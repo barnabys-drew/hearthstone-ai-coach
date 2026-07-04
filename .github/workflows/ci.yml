@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run unit tests
+        run: python -m unittest discover -s tests
+      - name: Run deck builder self-test
+        run: python hearthstone-deck-builder/scripts/build_deck_code.py --selftest
+      - name: Run sample one-shot workflow
+        run: |
+          python hearthstone-deck-recommender/scripts/recommend_and_import.py \
+            --collection examples/collection.sample.json \
+            --decks examples/meta_decks.sample.json \
+            --cards-json examples/cards.sample.json \
+            --no-fetch \
+            --top-missing 3

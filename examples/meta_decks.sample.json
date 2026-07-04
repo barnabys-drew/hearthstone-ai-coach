@@ -1,0 +1,16 @@
+{
+  "decks": [
+    {
+      "name": "Sample Expensive Control",
+      "class": "Warrior",
+      "winrate": 54.0,
+      "deckstring": "AAEBAQcBBAMBAgMAAA=="
+    },
+    {
+      "name": "Sample Cheap Tempo",
+      "class": "Warrior",
+      "winrate": 51.0,
+      "deckstring": "AAEBAQcBBQEBAAA="
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+[
+  {"dbfId": 1, "name": "Training Common", "rarity": "COMMON", "set": "EXPERT1", "cost": 1},
+  {"dbfId": 2, "name": "Practice Rare", "rarity": "RARE", "set": "EXPERT1", "cost": 2},
+  {"dbfId": 3, "name": "Testing Epic", "rarity": "EPIC", "set": "EXPERT1", "cost": 3},
+  {"dbfId": 4, "name": "Sample Legendary", "rarity": "LEGENDARY", "set": "EXPERT1", "cost": 9},
+  {"dbfId": 5, "name": "Core Freebie", "rarity": "COMMON", "set": "CORE", "cost": 1}
+]

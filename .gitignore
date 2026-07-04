@@ -17,3 +17,13 @@ decks.txt
 # OS / editor
 .DS_Store
 *.swp
+
+# Secrets / account-specific exports
+.env
+*.env
+cookies.txt
+*.cookie
+/account_lo*.json
+/collection*.json
+/collection*.csv
+/meta_decks.local.json

@@ -1,0 +1,4 @@
+# Sample Expensive Control
+AAEBAQcBBAMBAgMAAA==
+# Sample Cheap Tempo
+AAEBAQcBBQEBAAA=
