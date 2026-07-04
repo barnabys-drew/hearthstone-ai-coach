@@ -378,6 +378,10 @@ def evaluate_deck(
                 "cost_each": cost,
                 "dust": line_dust,
                 "cost": card.get("cost"),
+                "type": str(card.get("type", "")).upper(),
+                "cardClass": str(card.get("cardClass", "")).upper(),
+                "race": str(card.get("race", "")).upper() if card.get("race") else None,
+                "mechanics": [str(m).upper() for m in card.get("mechanics", [])],
             }
         )
 
@@ -399,6 +403,157 @@ def evaluate_deck(
         }
     )
     return result
+
+
+def build_owned_pool(owned: dict[int, int], by_dbf: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Materialize owned cards into flat records for substitute matching.
+
+    Returns a list of dicts with: dbfId, name, cardClass, type, cost (mana), race,
+    mechanics, rarity, owned_count. All string fields are upper-cased.
+    """
+    pool: list[dict[str, Any]] = []
+    for dbf, count in owned.items():
+        if count <= 0:
+            continue
+        card = by_dbf.get(dbf)
+        if not card:
+            continue
+        pool.append(
+            {
+                "dbfId": dbf,
+                "name": card.get("name", f"dbfId {dbf}"),
+                "cardClass": str(card.get("cardClass", "")).upper(),
+                "type": str(card.get("type", "")).upper(),
+                "cost": card.get("cost"),  # mana cost, not dust cost
+                "race": str(card.get("race", "")).upper() if card.get("race") else None,
+                "mechanics": [str(m).upper() for m in card.get("mechanics", [])],
+                "rarity": str(card.get("rarity", "")).upper(),
+                "owned_count": count,
+            }
+        )
+    return pool
+
+
+def find_substitutes(
+    missing_entry: dict[str, Any],
+    *,
+    deck_class: str | None,
+    decoded_cards: list[tuple[int, int]],
+    owned_pool: list[dict[str, Any]],
+    cost_window: int = 1,
+    max_substitutes: int = 3,
+) -> list[dict[str, Any]]:
+    """Find owned cards that could substitute for a missing card.
+
+    Filters by legality (class), type match, mana cost window, and copy headroom,
+    then scores by tribe/mechanics overlap. Returns top N candidates sorted by
+    score (highest first), or [] if no matches.
+
+    Scores: +2 for matching race, +1 per shared mechanic.
+    Tie-breaks: lower cost distance, then alphabetical name.
+    """
+    legal_classes = {"NEUTRAL"}
+    if deck_class:
+        legal_classes.add(deck_class.strip().upper())
+
+    missing_type = missing_entry.get("type", "").upper()
+    missing_cost = missing_entry.get("cost")
+    missing_race = missing_entry.get("race")
+    missing_mechanics = set(missing_entry.get("mechanics", []))
+
+    deck_counts = dict(decoded_cards)
+    missing_dbf = missing_entry.get("dbfId")
+
+    candidates: list[tuple[int, int, dict[str, Any]]] = []
+
+    for card in owned_pool:
+        card_class = card.get("cardClass", "").upper()
+        card_type = card.get("type", "").upper()
+
+        if card_class and card_class not in legal_classes:
+            continue
+        if card_type != missing_type:
+            continue
+
+        card_cost = card.get("cost")
+        if card_cost is not None and missing_cost is not None:
+            if abs(card_cost - missing_cost) > cost_window:
+                continue
+
+        if card.get("dbfId") == missing_dbf:
+            continue
+
+        max_copies = 1 if card.get("rarity") == "LEGENDARY" else 2
+        current_in_deck = deck_counts.get(card.get("dbfId"), 0)
+        headroom = min(card.get("owned_count", 0), max_copies) - current_in_deck
+        if headroom <= 0:
+            continue
+
+        card_mechanics = set(card.get("mechanics", []))
+        score = 0
+        if missing_race and card.get("race") == missing_race:
+            score += 2
+        score += len(missing_mechanics & card_mechanics)
+
+        cost_distance = 0
+        if card_cost is not None and missing_cost is not None:
+            cost_distance = abs(card_cost - missing_cost)
+
+        candidates.append((score, cost_distance, card))
+
+    candidates.sort(key=lambda x: (-x[0], x[1], x[2].get("name", "")))
+
+    # The same card name can exist under several dbfIds (Core vs. legacy
+    # printings). Keep only the best-scoring printing per name so the top-N
+    # suggestions are N distinct cards.
+    results: list[dict[str, Any]] = []
+    seen_names: set[str] = set()
+    for score, _cost_distance, card in candidates:
+        name = card.get("name", "")
+        if name in seen_names:
+            continue
+        seen_names.add(name)
+        results.append(
+            {
+                "dbfId": card["dbfId"],
+                "name": card["name"],
+                "cost": card["cost"],
+                "rarity": card["rarity"],
+                "race": card["race"],
+                "mechanics": card["mechanics"],
+                "match_score": score,
+                "owned_count": card["owned_count"],
+            }
+        )
+        if len(results) >= max_substitutes:
+            break
+    return results
+
+
+def attach_substitutes(
+    deck: dict[str, Any],
+    owned_pool: list[dict[str, Any]],
+    *,
+    limit: int,
+    cost_window: int = 1,
+    max_substitutes: int = 3,
+) -> None:
+    """Mutate deck['missing'][:limit] in place, adding a 'substitutes' key.
+
+    Only runs on the deck actually shown to the user, not on every ranked candidate.
+    """
+    deck_class = deck.get("class") or deck.get("hero_class")
+    decoded_cards = deck.get("decoded_cards", [])
+
+    for m in deck.get("missing", [])[:limit]:
+        m["substitutes"] = find_substitutes(
+            m,
+            deck_class=deck_class,
+            decoded_cards=decoded_cards,
+            owned_pool=owned_pool,
+            cost_window=cost_window,
+            max_substitutes=max_substitutes,
+        )
 
 
 def _winrate(deck: dict[str, Any]) -> float:
@@ -452,6 +607,10 @@ def format_report(results: list[dict[str, Any]], *, top_missing: int) -> str:
             for m in shown:
                 cost = f"{m['dust']} dust" if m["dust"] else "free (Core)"
                 lines.append(f"    - {m['need']}x {m['name']} ({m['rarity'].title()}, {cost})")
+                subs = m.get("substitutes", [])
+                if subs:
+                    sub_strs = [f"{s['name']} ({s['cost']}-mana {s['rarity'].title()})" for s in subs]
+                    lines.append(f"        owned alternatives (attribute match only, not verified): {', '.join(sub_strs)}")
             if len(best["missing"]) > top_missing:
                 lines.append(f"    ... and {len(best['missing']) - top_missing} more")
     return "\n".join(lines)
@@ -567,6 +726,10 @@ def format_visual_report(
             for m in missing:
                 cost = f"{m['dust']} dust" if m.get("dust") else "free/Core"
                 lines.append(f"  - {m['need']}x {m['name']} ({m['rarity'].title()}, {cost})")
+                subs = m.get("substitutes", [])
+                if subs:
+                    sub_strs = [f"{s['name']} ({s['cost']}-mana {s['rarity'].title()})" for s in subs]
+                    lines.append(f"      owned alternatives: {', '.join(sub_strs)}")
         lines.append("")
     lines.append("## Dust tiers")
     for label, decks in tier_results(results).items():
@@ -604,6 +767,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--view", choices=["table", "visual", "both"], default="table", help="Text output style")
     parser.add_argument("--available-dust", type=int, help="Dust available for affordable/best-build recommendations")
     parser.add_argument("--close-dust", type=int, default=3200, help="Dust threshold for close/easy craft picks")
+    parser.add_argument("--suggest-substitutes", action="store_true", help="Suggest owned cards as substitutes for missing cards")
+    parser.add_argument("--substitute-cost-window", type=int, default=1, help="Mana cost window for substitute matching (default 1)")
+    parser.add_argument("--max-substitutes", type=int, default=3, help="Max substitute suggestions per missing card (default 3)")
     parser.add_argument("--json", action="store_true", help="Emit full JSON instead of the text report")
     args = parser.parse_args(argv)
 
@@ -632,6 +798,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.budget is not None:
             results = [d for d in results if d["dust_needed"] <= args.budget]
         results = rank(results, args.sort)[: args.max_results]
+
+        if args.suggest_substitutes and results:
+            owned_pool = build_owned_pool(owned, by_dbf)
+            attach_substitutes(
+                results[0],
+                owned_pool,
+                limit=args.top_missing,
+                cost_window=args.substitute_cost_window,
+                max_substitutes=args.max_substitutes,
+            )
 
         if args.json:
             print(json.dumps(results, indent=2))

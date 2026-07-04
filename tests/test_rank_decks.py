@@ -158,5 +158,259 @@ class ReadLimitedTests(unittest.TestCase):
         self.assertIn("size limit", str(ctx.exception))
 
 
+class BuildOwnedPoolTests(unittest.TestCase):
+    def test_empty_collection_returns_empty_pool(self) -> None:
+        owned = {}
+        by_dbf = {}
+        pool = r.build_owned_pool(owned, by_dbf)
+        self.assertEqual(pool, [])
+
+    def test_skips_zero_count_cards(self) -> None:
+        owned = {1: 0, 2: 1}
+        by_dbf = {1: {"name": "Card 1"}, 2: {"name": "Card 2"}}
+        pool = r.build_owned_pool(owned, by_dbf)
+        self.assertEqual(len(pool), 1)
+        self.assertEqual(pool[0]["dbfId"], 2)
+
+    def test_skips_unknown_cards(self) -> None:
+        owned = {1: 1, 2: 1}
+        by_dbf = {1: {"name": "Card 1"}}  # Card 2 missing
+        pool = r.build_owned_pool(owned, by_dbf)
+        self.assertEqual(len(pool), 1)
+        self.assertEqual(pool[0]["name"], "Card 1")
+
+    def test_materializes_card_attributes(self) -> None:
+        owned = {1: 2}
+        by_dbf = {
+            1: {
+                "name": "Beast",
+                "cardClass": "warrior",
+                "type": "minion",
+                "cost": 3,
+                "race": "beast",
+                "mechanics": ["taunt", "divine_shield"],
+                "rarity": "rare",
+            }
+        }
+        pool = r.build_owned_pool(owned, by_dbf)
+        self.assertEqual(len(pool), 1)
+        card = pool[0]
+        self.assertEqual(card["name"], "Beast")
+        self.assertEqual(card["cardClass"], "WARRIOR")
+        self.assertEqual(card["type"], "MINION")
+        self.assertEqual(card["cost"], 3)
+        self.assertEqual(card["race"], "BEAST")
+        self.assertEqual(card["mechanics"], ["TAUNT", "DIVINE_SHIELD"])
+        self.assertEqual(card["owned_count"], 2)
+
+
+class FindSubstitutesTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.owned_pool = [
+            {
+                "dbfId": 10,
+                "name": "Same Class Minion",
+                "cardClass": "WARRIOR",
+                "type": "MINION",
+                "cost": 3,
+                "race": "BEAST",
+                "mechanics": ["TAUNT"],
+                "rarity": "RARE",
+                "owned_count": 2,
+            },
+            {
+                "dbfId": 11,
+                "name": "Wrong Class",
+                "cardClass": "MAGE",
+                "type": "MINION",
+                "cost": 3,
+                "race": "BEAST",
+                "mechanics": [],
+                "rarity": "COMMON",
+                "owned_count": 2,
+            },
+            {
+                "dbfId": 12,
+                "name": "Wrong Type",
+                "cardClass": "WARRIOR",
+                "type": "SPELL",
+                "cost": 3,
+                "race": None,
+                "mechanics": ["TAUNT"],
+                "rarity": "COMMON",
+                "owned_count": 2,
+            },
+            {
+                "dbfId": 13,
+                "name": "Out of Cost Window",
+                "cardClass": "WARRIOR",
+                "type": "MINION",
+                "cost": 6,
+                "race": None,
+                "mechanics": [],
+                "rarity": "COMMON",
+                "owned_count": 2,
+            },
+            {
+                "dbfId": 14,
+                "name": "Neutral Match",
+                "cardClass": "NEUTRAL",
+                "type": "MINION",
+                "cost": 3,
+                "race": "BEAST",
+                "mechanics": [],
+                "rarity": "COMMON",
+                "owned_count": 2,
+            },
+        ]
+
+    def test_reprints_are_deduped_by_name(self) -> None:
+        # The same card can exist under several dbfIds (Core vs. legacy
+        # printings); suggestions must not repeat it.
+        reprint_pool = [
+            {
+                "dbfId": dbf,
+                "name": "Execute Twin",
+                "cardClass": "WARRIOR",
+                "type": "MINION",
+                "cost": 3,
+                "race": None,
+                "mechanics": [],
+                "rarity": "COMMON",
+                "owned_count": 2,
+            }
+            for dbf in (20, 21, 22)
+        ] + [self.owned_pool[0]]  # Same Class Minion
+        missing = {
+            "dbfId": 1,
+            "name": "Missing",
+            "type": "MINION",
+            "cost": 3,
+            "race": None,
+            "mechanics": [],
+        }
+        subs = r.find_substitutes(
+            missing, deck_class="WARRIOR", decoded_cards=[], owned_pool=reprint_pool
+        )
+        names = [s["name"] for s in subs]
+        self.assertEqual(len(names), len(set(names)), f"duplicate names in {names}")
+        self.assertIn("Execute Twin", names)
+        self.assertIn("Same Class Minion", names)
+
+    def test_filters_by_class_legality(self) -> None:
+        missing = {
+            "dbfId": 1,
+            "name": "Missing",
+            "type": "MINION",
+            "cost": 3,
+            "race": None,
+            "mechanics": [],
+        }
+        # Wrong class should be filtered
+        subs = r.find_substitutes(
+            missing, deck_class="WARRIOR", decoded_cards=[], owned_pool=self.owned_pool
+        )
+        names = [s["name"] for s in subs]
+        self.assertIn("Same Class Minion", names)
+        self.assertIn("Neutral Match", names)
+        self.assertNotIn("Wrong Class", names)
+
+    def test_filters_by_type_match(self) -> None:
+        missing = {
+            "dbfId": 1,
+            "name": "Missing Minion",
+            "type": "MINION",
+            "cost": 3,
+            "race": None,
+            "mechanics": [],
+        }
+        subs = r.find_substitutes(
+            missing, deck_class="WARRIOR", decoded_cards=[], owned_pool=self.owned_pool
+        )
+        types = {s["name"]: s for s in subs}
+        self.assertNotIn("Wrong Type", types)
+
+    def test_filters_by_cost_window(self) -> None:
+        missing = {
+            "dbfId": 1,
+            "name": "Missing",
+            "type": "MINION",
+            "cost": 3,
+            "race": None,
+            "mechanics": [],
+        }
+        subs = r.find_substitutes(
+            missing,
+            deck_class="WARRIOR",
+            decoded_cards=[],
+            owned_pool=self.owned_pool,
+            cost_window=1,
+        )
+        names = [s["name"] for s in subs]
+        self.assertNotIn("Out of Cost Window", names)
+
+    def test_excludes_self(self) -> None:
+        missing = {
+            "dbfId": 10,
+            "name": "Missing",
+            "type": "MINION",
+            "cost": 3,
+            "race": "BEAST",
+            "mechanics": ["TAUNT"],
+        }
+        subs = r.find_substitutes(
+            missing, deck_class="WARRIOR", decoded_cards=[], owned_pool=self.owned_pool
+        )
+        names = [s["name"] for s in subs]
+        self.assertNotIn("Same Class Minion", names)
+
+    def test_scores_by_tribe_overlap(self) -> None:
+        missing = {
+            "dbfId": 1,
+            "name": "Missing Beast",
+            "type": "MINION",
+            "cost": 3,
+            "race": "BEAST",
+            "mechanics": [],
+        }
+        subs = r.find_substitutes(
+            missing, deck_class="WARRIOR", decoded_cards=[], owned_pool=self.owned_pool
+        )
+        self.assertGreater(len(subs), 0)
+        self.assertEqual(subs[0]["match_score"], 2)
+
+    def test_truncates_to_max_substitutes(self) -> None:
+        missing = {
+            "dbfId": 1,
+            "name": "Missing",
+            "type": "MINION",
+            "cost": 3,
+            "race": "BEAST",
+            "mechanics": [],
+        }
+        subs = r.find_substitutes(
+            missing,
+            deck_class="WARRIOR",
+            decoded_cards=[],
+            owned_pool=self.owned_pool,
+            max_substitutes=1,
+        )
+        self.assertEqual(len(subs), 1)
+
+    def test_returns_empty_when_no_matches(self) -> None:
+        missing = {
+            "dbfId": 1,
+            "name": "Missing",
+            "type": "WEAPON",
+            "cost": 3,
+            "race": None,
+            "mechanics": [],
+        }
+        subs = r.find_substitutes(
+            missing, deck_class="WARRIOR", decoded_cards=[], owned_pool=self.owned_pool
+        )
+        self.assertEqual(subs, [])
+
+
 if __name__ == "__main__":
     unittest.main()
