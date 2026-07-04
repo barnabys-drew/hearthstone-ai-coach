@@ -122,6 +122,8 @@ Key options:
 - `--sort value` (default: cheapest first, win-rate tiebreak) | `dust` | `completion`.
 - `--budget N` shows only decks completable within N dust.
 - `--max-results N`, `--top-missing N`, `--json` for machine-readable output.
+- `--suggest-substitutes` suggests owned cards as substitutes for missing cards; pairs with
+  `--substitute-cost-window` (mana window, default 1) and `--max-substitutes` (per-card limit, default 3).
 - `scripts/recommend_and_import.py` accepts the same collection/deck/card options, plus
   `--view visual|table|both`, `--pick-policy close|affordable|overall|cheapest|rank`,
   `--available-dust`, and `--close-dust`. The wrapper detects `dust` from HSReplay
@@ -139,5 +141,11 @@ Give the user:
 2. A clear top recommendation with the reasoning (dust vs. competitiveness).
 3. The exact missing cards for the recommended deck, and the deckstring so they can
    import it once built.
+4. If `--suggest-substitutes` was requested, a shortlist of owned cards that are
+   mechanically similar (class-legal, same type, similar mana cost, overlapping
+   traits/keywords) to each missing card. **Treat these as raw candidates only** — use
+   your own Hearthstone knowledge to judge whether any are actually good functional
+   replacements (curve fit, synergy tags like Reborn/Corrupt, combo pieces), and say
+   so explicitly rather than presenting the shortlist itself as the answer.
 
 See `references/data-formats.md` for exact input shapes and examples.

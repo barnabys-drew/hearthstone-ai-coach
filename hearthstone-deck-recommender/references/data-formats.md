@@ -77,6 +77,45 @@ For each deck the script decodes the deckstring, and for every card computes
 craft cost (Common 40, Rare 100, Epic 400, Legendary 1600), and sums. Core-set cards are
 0 dust (uncraftable / earned by leveling) and reported separately as free cards.
 
+## Substitute suggestions
+
+When `--suggest-substitutes` is passed to `rank_decks.py` or `recommend_and_import.py`,
+the scripts scan your owned collection for cards that could substitute for each missing
+card in the recommended deck. **These are unverified, attribute-only candidates** — the
+surrounding AI step is responsible for judging whether any are actually strategically
+sound (curve fit, synergy tags, combo pieces).
+
+**Flags**:
+- `--suggest-substitutes` — enable substitute suggestions (default off)
+- `--substitute-cost-window` — mana cost window for matching (default 1; e.g., 1 matches ±1 mana)
+- `--max-substitutes` — max suggestions per missing card (default 3)
+
+**How it works**:
+1. **Legality**: candidate must be `NEUTRAL` or match the deck's class.
+2. **Type match**: candidate's card type (MINION/SPELL/WEAPON) must match exactly.
+3. **Mana cost window**: `|candidate_cost - missing_cost| <= window`.
+4. **Copy headroom**: candidate can't already fill the deck slot (max 1 for Legendary, 2 for others).
+5. **Score by overlap**: `+2` for matching race/tribe, `+1` per shared mechanic keyword.
+6. Sorted by score (highest first), truncated to `--max-substitutes`.
+
+**Important caveats**:
+- Death Knight rune legality is not modeled — a Warrior-legal substitute may need the wrong rune.
+- Highlander singleton rules aren't tracked — a suggested card might violate singleton constraints in that specific deck.
+- Scores are based only on card attributes (cost, type, mechanics, tribe) and do not account for curve, combos, or meta positioning.
+
+**Output**: When rendered, substitute suggestions appear as a sub-line under each missing card,
+in both text reports (`format_report`, `format_visual_report`) and the Hearthstone import block
+(all lines `#`-prefixed for paste safety). Example:
+
+```
+  - 1x Sample Legendary (Legendary, 1600 dust)
+      owned alternatives (attribute match only, not verified): Other Legendary (9-mana Legendary)
+```
+
+**Scoping**: Substitutes are computed only for the single top-ranked (`rank_decks.py`) or
+chosen (`recommend_and_import.py`) deck, and only for its first `--top-missing` entries.
+This keeps the per-invocation cost low, even with large collections.
+
 ## One-shot import flow
 
 Use `scripts/recommend_and_import.py` when you want the skills to work together:

@@ -28,6 +28,8 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 from fetch_meta_decks import fetch_decks  # type: ignore  # noqa: E402
 from rank_decks import (  # type: ignore  # noqa: E402
+    attach_substitutes,
+    build_owned_pool,
     choose_recommendations,
     evaluate_deck,
     format_report,
@@ -111,6 +113,10 @@ def format_import_block(deck: dict[str, Any], *, top_missing: int) -> str:
         for m in missing:
             dust = f"{m['dust']} dust" if m.get("dust") else "free/Core"
             lines.append(f"# - {m.get('need', 1)}x {m.get('name', 'Unknown')} ({m.get('rarity', 'UNKNOWN')}, {dust})")
+            subs = m.get("substitutes", [])
+            if subs:
+                sub_strs = [f"{s['name']} ({s['cost']}-mana {s['rarity'].title()})" for s in subs]
+                lines.append(f"#     substitutes you own (unverified — pick by curve/synergy): {', '.join(sub_strs)}")
         lines.append("#")
 
     lines.append(code)
@@ -142,6 +148,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--view", choices=["visual", "table", "both"], default="visual", help="Recommendation output style")
     parser.add_argument("--pick-policy", choices=["close", "affordable", "overall", "cheapest", "rank"], default="close", help="Which deck to print as the import block")
     parser.add_argument("--pick", type=int, default=1, help="1-based ranked deck to output when --pick-policy rank")
+    parser.add_argument("--suggest-substitutes", action="store_true", help="Suggest owned cards as substitutes for missing cards")
+    parser.add_argument("--substitute-cost-window", type=int, default=1, help="Mana cost window for substitute matching (default 1)")
+    parser.add_argument("--max-substitutes", type=int, default=3, help="Max substitute suggestions per missing card (default 3)")
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON with ranked decks and chosen import block")
     args = parser.parse_args(argv)
 
@@ -195,6 +204,15 @@ def main(argv: list[str] | None = None) -> int:
             available_dust=available_dust,
             close_dust=args.close_dust,
         )
+        if args.suggest_substitutes:
+            owned_pool = build_owned_pool(owned, by_dbf)
+            attach_substitutes(
+                chosen,
+                owned_pool,
+                limit=args.top_missing,
+                cost_window=args.substitute_cost_window,
+                max_substitutes=args.max_substitutes,
+            )
         import_block = format_import_block(chosen, top_missing=args.top_missing)
 
         if args.json:
