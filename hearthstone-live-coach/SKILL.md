@@ -23,9 +23,13 @@ got them wrong in live play.
    ```
 2. Watch its stdout for these markers (e.g. with a background Monitor/tail):
    ```
-   ^== MULLIGAN|^== TURN.*your turn|^== GAME OVER|Traceback|Error
+   ^== MULLIGAN|^== TURN.*your turn|^== DISCOVER PENDING|^== UPDATE|^== GAME OVER|Traceback|Error
    ```
    Do NOT trigger on opponent turns — stay quiet during them unless the user asks.
+   - `^== DISCOVER PENDING` fires mid-turn when the coach's poll lands in the window between a
+     Discover choice appearing and you clicking it (best-effort, not guaranteed).
+   - `^== UPDATE` fires when a card appears mid-turn (discovered, summoned, etc.) via Tier-1 delta
+     detection; always arrives within one poll interval (~3s default).
 3. On each marker, read the full snapshot JSON:
    `~/.local/share/hearthstone-tracker/live.json` (or the `--json-file` override).
    Always re-read it fresh; it is rewritten continuously and the stdout line is
@@ -88,14 +92,14 @@ Work through this checklist before writing anything:
   counting incoming damage next turn, treat exhausted minions as full threats, not
   defused ones. This cost a race: I assumed a 14/8 exhausted minion was safe, but it
   attacked twice for 28 damage.
-- **Discover and deathrattle mechanics are invisible to the snapshot.** When a card
-  says "Discover a minion," that choice happens mid-turn after the snapshot was
-  fired. Your hand on turn N+1 includes the discovered card, but advice on turn N
-  couldn't see it coming. Same with deathrattles: they resolve during death, and
-  by the next snapshot they're done. If advice seems out of sync with your actual
-  hand (e.g., "you have 4 cards but we advised as if you had 3"), you picked a
-  discover and the snapshot doesn't know yet. This is not a bug in the advice, just
-  a 1-turn lag inherent to turn-boundary snapshots.
+- **Discover and deathrattle mechanics now surface mid-turn.** Discovers may fire a
+  `== DISCOVER PENDING` marker (Tier 2, best-effort) showing offered options before you
+  click, if the poll lands in that window. More reliably, discovered/summoned cards appear
+  in an `== UPDATE` marker within one poll interval after they land in your hand or board
+  (Tier 1, always fires). Deathrattle results (shuffled cards, summoned tokens) also show
+  up in `== UPDATE` within the next poll. The one residual lag: cards shuffled *into the
+  deck* (Illusory Greenwing dragons) won't show in `deck_cards_left` until you draw them,
+  since that list derives from your decklist, not discovered additions.
 - Advising "play Slam" as if it were a minion — it is a targeted spell and the
   game rejects it with no board. Type/text fields exist so this never recurs.
 - Treating Erupting Volcano as a one-shot AoE spell — it is a LOCATION with a

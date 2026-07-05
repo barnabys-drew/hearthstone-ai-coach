@@ -107,7 +107,10 @@ def cmd_live(args) -> int:
     import time
 
     from .config import DEFAULT_DB
-    from .live import LiveGameTail, format_snapshot, write_snapshot_json
+    from .live import (
+        LiveGameTail, format_snapshot, write_snapshot_json,
+        snapshot_delta, pending_discover,
+    )
 
     log_root = find_log_root(args.logs_root)
     json_file = Path(args.json_file) if args.json_file else DEFAULT_DB.parent / "live.json"
@@ -117,6 +120,8 @@ def cmd_live(args) -> int:
     tail: LiveGameTail | None = None
     current_dir = None
     last_marker = None  # (path, raw_turn, phase, game_over) last printed
+    last_snap = None  # for snapshot_delta comparisons
+    seen_discover_ids = set()  # to avoid re-printing the same pending choice
     deck_counts = None
     deck_game_no = -1
 
@@ -126,6 +131,8 @@ def cmd_live(args) -> int:
         if newest and newest != current_dir:
             current_dir = newest
             tail = None
+            last_snap = None
+            seen_discover_ids.clear()
             print(f"watching {newest}", flush=True)
         path = current_dir / "Power.log" if current_dir else None
         if path and path.exists() and (tail is None or tail.path != path):
@@ -135,13 +142,51 @@ def cmd_live(args) -> int:
                 # A new game began; re-read Decks.log for the deck just queued.
                 deck_game_no = tail.game_no
                 deck_counts = _current_deck_counts(current_dir, resolver)
+                seen_discover_ids.clear()  # reset for the new game
             snap = tail.snapshot(resolver, deck_counts=deck_counts)
             if snap:
                 write_snapshot_json(snap, json_file)
                 marker = (str(tail.path), snap["raw_turn"], snap.get("phase"), snap.get("game_over"))
+
+                # Tier 2: Check for pending unresolved Discovers (best-effort)
+                if tail.last_tree:
+                    try:
+                        friendly_id = None
+                        # Infer friendly player id from the exported snapshot or tree
+                        from .capture import _player_names
+                        names_dict = _player_names(tail.last_tree)
+                        if names_dict:
+                            # Find the player we're tracking (the first one in the game)
+                            if tail.last_tree.players:
+                                friendly_id = tail.last_tree.players[0].player_id
+
+                        if friendly_id is not None:
+                            discover = pending_discover(tail.last_tree, resolver, friendly_id)
+                            if discover and discover["source"] not in seen_discover_ids:
+                                seen_discover_ids.add(discover["source"])
+                                options_str = " | ".join(
+                                    opt["name"] for opt in discover.get("options", [])
+                                )
+                                print(
+                                    f"== DISCOVER PENDING — {discover['source']}: {options_str}",
+                                    flush=True
+                                )
+                    except Exception:
+                        pass  # Silently skip pending_discover errors
+
                 if marker != last_marker:
                     last_marker = marker
                     print(format_snapshot(snap), flush=True)
+                    last_snap = snap
+                elif last_snap:
+                    # Tier 1: Report mid-turn changes (hand/board)
+                    delta_str = snapshot_delta(last_snap, snap)
+                    if delta_str:
+                        print(delta_str, flush=True)
+                    last_snap = snap
+                else:
+                    last_snap = snap  # Initialize baseline
+
                 if args.once:
                     return 0
         if args.once:

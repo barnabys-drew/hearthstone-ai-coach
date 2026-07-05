@@ -54,6 +54,155 @@ def card_text(card: dict) -> str | None:
     return " ".join(text.split()) or None
 
 
+def snapshot_delta(prev: dict, curr: dict) -> str | None:
+    """Compare snapshots, return a one-liner if hand/board changed mid-turn.
+
+    Returns None if nothing meaningful changed (same hand/board names on both
+    sides). Otherwise returns e.g. "== UPDATE (turn 5) — my hand gained: X | opp
+    board gained: Y". Only compares hand/board *names* (Counter multiset), not
+    full details — assumes live.json already has the full card info.
+    """
+    from collections import Counter
+
+    if not prev or not curr:
+        return None
+
+    me_prev = prev.get("me", {})
+    me_curr = curr.get("me", {})
+    opp_prev = prev.get("opp", {})
+    opp_curr = curr.get("opp", {})
+
+    # Friendly side: check hand + board names changed
+    my_hand_prev = Counter(c["name"] for c in me_prev.get("hand", []))
+    my_hand_curr = Counter(c["name"] for c in me_curr.get("hand", []))
+    my_board_prev = Counter(c["name"] for c in me_prev.get("board", []))
+    my_board_curr = Counter(c["name"] for c in me_curr.get("board", []))
+
+    my_hand_gained = my_hand_curr - my_hand_prev
+    my_hand_lost = my_hand_prev - my_hand_curr
+    my_board_gained = my_board_curr - my_board_prev
+    my_board_lost = my_board_prev - my_board_curr
+
+    # Opponent side: check hand count + board names changed
+    opp_hand_count_prev = opp_prev.get("hand_hidden", 0) + len(opp_prev.get("hand", []))
+    opp_hand_count_curr = opp_curr.get("hand_hidden", 0) + len(opp_curr.get("hand", []))
+    opp_board_prev = Counter(c["name"] for c in opp_prev.get("board", []))
+    opp_board_curr = Counter(c["name"] for c in opp_curr.get("board", []))
+
+    opp_board_gained = opp_board_curr - opp_board_prev
+    opp_board_lost = opp_board_prev - opp_board_curr
+
+    # Build output if anything changed
+    parts = []
+    turn = curr.get("turn")
+
+    if my_hand_gained or my_hand_lost or my_board_gained or my_board_lost:
+        my_parts = []
+        if my_hand_gained:
+            my_parts.append(f"hand +{', '.join(sorted(my_hand_gained.elements()))}")
+        if my_hand_lost:
+            my_parts.append(f"hand -{', '.join(sorted(my_hand_lost.elements()))}")
+        if my_board_gained:
+            my_parts.append(f"board +{', '.join(sorted(my_board_gained.elements()))}")
+        if my_board_lost:
+            my_parts.append(f"board -{', '.join(sorted(my_board_lost.elements()))}")
+        if my_parts:
+            parts.append("my " + ", ".join(my_parts))
+
+    if opp_hand_count_curr != opp_hand_count_prev or opp_board_gained or opp_board_lost:
+        opp_parts = []
+        if opp_hand_count_curr != opp_hand_count_prev:
+            delta = opp_hand_count_curr - opp_hand_count_prev
+            opp_parts.append(f"hand {'+' if delta > 0 else ''}{delta}")
+        if opp_board_gained:
+            opp_parts.append(f"board +{', '.join(sorted(opp_board_gained.elements()))}")
+        if opp_board_lost:
+            opp_parts.append(f"board -{', '.join(sorted(opp_board_lost.elements()))}")
+        if opp_parts:
+            parts.append("opp " + ", ".join(opp_parts))
+
+    if not parts:
+        return None
+
+    turn_str = f"(turn {turn})" if turn else ""
+    return f"== UPDATE {turn_str} — {' | '.join(parts)}"
+
+
+def pending_discover(
+    tree: Any,
+    resolver: HeroClassResolver,
+    friendly_id: int,
+) -> dict | None:
+    """Return unresolved Discover choice details (source + options), or None.
+
+    Checks for live (unresolved) Choices packets where:
+    - type == ChoiceType.GENERAL (Discover, not Mulligan)
+    - No matching SendChoices has been received yet
+    - Owner matches friendly_id (skip opponent discovers)
+
+    Returns {"source": <name>, "options": [<card>, ...]} if found, else None.
+    Cards in options have {name, cost, type, text} from resolver.card().
+    """
+    from hearthstone.enums import ChoiceType
+    from hslog.packets import Choices, SendChoices
+    from hslog.export import EntityTreeExporter
+
+    try:
+        # Build a map of resolved choice ids (those with matching SendChoices)
+        resolved_ids = set()
+        for send in tree.recursive_iter(SendChoices):
+            resolved_ids.add(send.id)
+
+        # Find unresolved Discovers
+        try:
+            game = EntityTreeExporter(tree).export().game
+        except Exception:
+            return None
+
+        for choice in tree.recursive_iter(Choices):
+            if choice.type != ChoiceType.GENERAL:
+                continue  # Skip non-Discover choices (e.g., Mulligan)
+            if choice.id in resolved_ids:
+                continue  # Already resolved
+
+            # Check if this choice belongs to the friendly player
+            try:
+                source_entity = game.find_entity_by_id(choice.source)
+                controller = source_entity.tags.get(GameTag.CONTROLLER)
+                if controller != friendly_id:
+                    continue  # Opponent's discover, skip
+            except Exception:
+                continue
+
+            # Resolve the source and choices to card dicts
+            try:
+                source_card = resolver.card(source_entity.card_id)
+                source_name = source_card.get("name", str(choice.source))
+            except Exception:
+                source_name = str(choice.source)
+
+            options = []
+            for opt_id in choice.choices:
+                try:
+                    opt_entity = game.find_entity_by_id(opt_id)
+                    opt_card = resolver.card(opt_entity.card_id)
+                    options.append({
+                        "name": opt_card.get("name", str(opt_id)),
+                        "cost": opt_card.get("cost"),
+                        "type": opt_card.get("type"),
+                        "text": card_text(opt_card),
+                    })
+                except Exception:
+                    pass
+
+            if options:
+                return {"source": source_name, "options": options}
+
+        return None
+    except Exception:
+        return None
+
+
 def snapshot_from_tree(
     tree: Any,
     resolver: HeroClassResolver,
@@ -221,6 +370,7 @@ class LiveGameTail:
         self.partial = ""
         self.lines: list[str] = []
         self.game_no = 0  # bumps on each CREATE_GAME, so callers can refresh per-game state
+        self.last_tree: Any = None  # stash the last-parsed game tree for pending_discover()
 
     def poll(self) -> bool:
         """Read new bytes; True if the current-game buffer changed."""
@@ -267,8 +417,9 @@ class LiveGameTail:
                 continue
         if not parser.games:
             return None
+        self.last_tree = parser.games[-1]
         return snapshot_from_tree(
-            parser.games[-1], resolver,
+            self.last_tree, resolver,
             names=_player_names(parser), deck_counts=deck_counts,
         )
 
