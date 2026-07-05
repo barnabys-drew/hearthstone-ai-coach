@@ -53,10 +53,16 @@ same mistake doesn't repeat game after game.
    the user asks. `^== EXTRA TURN` is the one opponent-side exception (see below).
    - `^== DISCOVER PENDING` fires mid-turn when the coach's poll lands in the window between a
      Discover choice appearing and you clicking it (best-effort, not guaranteed). Multiple
-     simultaneous discovers each fire their own line.
+     simultaneous discovers each fire their own line. Each option now carries its cost and
+     rules text inline — enough to pick from the line alone. **Always answer with a pick, not
+     a menu**: first words "Pick X — <one reason>." The user is staring at three cards on a
+     timer; listing the options back at them is zero help (real-game miss: coach echoed the
+     three names, user had to ask "which one?").
    - `^== UPDATE` fires when the game state changes mid-turn: cards appearing in hand/board
      (discovered, summoned, etc.), or state swings (HP/armor damage, hero attack gained,
      secrets triggering, weapons). Always arrives within one poll interval (~1s default).
+     HP and armor deltas are labeled (`opp hp 22→19`, `opp armor 3→0`) — read the label,
+     they are different resources. An armor line hitting 0 is NOT a kill.
    - `^== EXTRA TURN` fires when the same side's turn repeats (an extra-turn effect) instead
      of play passing to the other side. The turn HEADER's displayed `TURN N` number pairs one
      raw turn from each side into a shared label, so a same-side repeat prints the identical
@@ -117,7 +123,14 @@ Work through this checklist before writing anything:
    `divine shield` absorbs one hit — pop it with the cheapest ping before real
    removal; `damaged` marks legal targets for damaged-only effects;
    `exhausted` minions can't attack this turn (newly played or already acted);
-   `frozen`/`stealth` as usual.
+   `frozen`/`stealth` as usual. Also shown now: `poisonous` (destroys any
+   minion it damages — never chump-block it with a big body), `reborn` (dies
+   TWICE — it comes back at 1 HP, so never write "dies" in a plan against a
+   reborn minion without budgeting the second kill; real-game miss: a
+   two-card removal plan on Whelp of the Infinite left its Reborn copy
+   standing), `lifesteal`, `rush`, `immune`, and `untargetable` (dormant/
+   uninteractable — your spells and attacks cannot select it; skip it in
+   plans entirely until it wakes).
 5. **Spend the hero's attack.** `me.attack` > 0 means the hero can swing this
    turn (weapon, or a temp buff like "+3 Attack this turn" — those expire at
    end of turn). Always say explicitly where the swing goes: face when racing,
@@ -187,3 +200,16 @@ Work through this checklist before writing anything:
 - Recommending a weapon swing into a big minion when the counter-damage put the
   player into exactly-lethal range. Count the counter-hit.
 - Popping a Twilight Egg "to clear the board" — it hatched into five 5/4s. Twice.
+- **Declaring victory off an unlabeled delta.** An `== UPDATE` line once read
+  `opp 3→0` — that was ARMOR reaching 0, not HP, and the coach announced
+  "GAME OVER: WON" while the game kept going (the opponent healed to 30 the
+  next turn). Deltas are labeled now (`opp armor 3→0`), but the rule stands
+  regardless: **a game is over when — and only when — the `== GAME OVER`
+  marker prints.** Never infer a win or loss from HP math, and never tell the
+  user the game ended without that marker. If state looks contradictory
+  (opponent "dead" but events keep flowing), say the state is unclear rather
+  than picking the flattering interpretation.
+- The mulligan marker now carries the dealt cards on the header line itself
+  (`== MULLIGAN — 5 card(s) dealt vs WARLOCK: Slam(1), ...`). If a mulligan
+  header ever arrives without cards, ask for a screenshot rather than
+  advising blind.

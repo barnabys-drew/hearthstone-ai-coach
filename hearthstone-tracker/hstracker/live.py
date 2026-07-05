@@ -33,6 +33,12 @@ _FLAG_TAGS = (
     (GameTag.FROZEN, "frozen"),
     (GameTag.WINDFURY, "windfury"),
     (GameTag.EXHAUSTED, "exhausted"),
+    (GameTag.POISONOUS, "poisonous"),
+    (GameTag.REBORN, "reborn"),
+    (GameTag.LIFESTEAL, "lifesteal"),
+    (GameTag.RUSH, "rush"),
+    (GameTag.IMMUNE, "immune"),
+    (GameTag.UNTOUCHABLE, "untargetable"),
 )
 
 
@@ -119,11 +125,11 @@ def snapshot_delta(prev: dict, curr: dict) -> str | None:
     my_secrets_curr = me_curr.get("secrets")
 
     if my_hp_prev != my_hp_curr or my_armor_prev != my_armor_curr:
-        hp_change = f"{my_hp_prev}→{my_hp_curr}" if my_hp_prev != my_hp_curr else ""
-        armor_change = f"{my_armor_prev}→{my_armor_curr}" if my_armor_prev != my_armor_curr else ""
+        hp_change = f"hp {my_hp_prev}→{my_hp_curr}" if my_hp_prev != my_hp_curr else ""
+        armor_change = f"armor {my_armor_prev}→{my_armor_curr}" if my_armor_prev != my_armor_curr else ""
         state_parts = [x for x in [hp_change, armor_change] if x]
         if state_parts:
-            parts.append("my " + " ".join(state_parts))
+            parts.append("my " + ", ".join(state_parts))
     my_atk_prev = me_prev.get("attack") or 0
     my_atk_curr = me_curr.get("attack") or 0
     if my_atk_prev != my_atk_curr:
@@ -164,11 +170,11 @@ def snapshot_delta(prev: dict, curr: dict) -> str | None:
     opp_secrets_curr = opp_curr.get("secrets")
 
     if opp_hp_prev != opp_hp_curr or opp_armor_prev != opp_armor_curr:
-        hp_change = f"{opp_hp_prev}→{opp_hp_curr}" if opp_hp_prev != opp_hp_curr else ""
-        armor_change = f"{opp_armor_prev}→{opp_armor_curr}" if opp_armor_prev != opp_armor_curr else ""
+        hp_change = f"hp {opp_hp_prev}→{opp_hp_curr}" if opp_hp_prev != opp_hp_curr else ""
+        armor_change = f"armor {opp_armor_prev}→{opp_armor_curr}" if opp_armor_prev != opp_armor_curr else ""
         state_parts = [x for x in [hp_change, armor_change] if x]
         if state_parts:
-            parts.append("opp " + " ".join(state_parts))
+            parts.append("opp " + ", ".join(state_parts))
     if (opp_weapon_prev is None and opp_weapon_curr is not None) or \
        (opp_weapon_prev is not None and opp_weapon_curr is None) or \
        (opp_weapon_prev and opp_weapon_curr and opp_weapon_prev != opp_weapon_curr):
@@ -556,11 +562,10 @@ def format_snapshot(snap: dict[str, Any]) -> str:
 
     if snap.get("phase") == "mulligan":
         opp_class = opp.get("class") or "?"
-        lines = [
-            f"== MULLIGAN — {len(me['hand'])} card(s) dealt vs {opp_class}",
-            f"   dealt: {_card_line(me['hand'])}",
-        ]
-        return "\n".join(lines)
+        # Everything on the header line: downstream notification watchers can
+        # deliver matched lines in separate batches, so a detail line under the
+        # header may arrive minutes late (or read as a separate event).
+        return f"== MULLIGAN — {len(me['hand'])} card(s) dealt vs {opp_class}: {_card_line(me['hand'])}"
 
     whose = "your turn" if snap.get("whose_turn") == "me" else "opponent's turn"
     my_atk = f" {me['attack']} atk," if me.get("attack") else ""

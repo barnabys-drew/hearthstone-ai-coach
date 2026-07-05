@@ -166,7 +166,9 @@ def cmd_live(args) -> int:
                             if choice_id not in seen_discover_ids:
                                 seen_discover_ids.add(choice_id)
                                 options_str = " | ".join(
-                                    opt["name"] for opt in discover.get("options", [])
+                                    f"{opt['name']}({opt.get('cost', '?')})"
+                                    + (f" [{opt['text'][:90]}]" if opt.get("text") else "")
+                                    for opt in discover.get("options", [])
                                 )
                                 print(
                                     f"== DISCOVER PENDING — {discover['source']}: {options_str}",
@@ -176,6 +178,21 @@ def cmd_live(args) -> int:
                         pass  # Silently skip pending_discovers errors
 
                 if marker != last_marker:
+                    # Game over with no turn change: the board already printed,
+                    # so a full re-print would be an identical block with one
+                    # new line buried at the bottom. Print just the verdict.
+                    if (
+                        last_marker is not None
+                        and marker[:3] == last_marker[:3]
+                        and snap.get("game_over")
+                    ):
+                        print(f"== GAME OVER: {snap['game_over']}", flush=True)
+                        last_marker = marker
+                        last_snap = snap
+                        if args.once:
+                            return 0
+                        time.sleep(args.interval)
+                        continue
                     # raw_turn increments once per turn taken by either side, but
                     # the displayed turn number pairs one raw_turn from each side
                     # into a shared "TURN N" label. An extra-turn effect (same
