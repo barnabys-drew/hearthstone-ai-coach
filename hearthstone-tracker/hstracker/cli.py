@@ -273,7 +273,7 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("live", help="Tail the current game's state in real time (for live advice)")
     p.add_argument("--logs-root", help="Hearthstone Logs directory (auto-detected by default)")
-    p.add_argument("--interval", type=float, default=3.0, help="Poll interval in seconds")
+    p.add_argument("--interval", type=float, default=1.0, help="Poll interval in seconds")
     p.add_argument("--json-file", help="Where to write the latest snapshot JSON (default: next to the DB)")
     p.add_argument("--once", action="store_true", help="Print one snapshot and exit")
     p.set_defaults(func=cmd_live)

@@ -23,30 +23,56 @@ got them wrong in live play.
    ```
 2. Watch its stdout for these markers (e.g. with a background Monitor/tail):
    ```
-   ^== MULLIGAN|^== TURN.*your turn|^== DISCOVER PENDING|^== UPDATE|^== GAME OVER|^!!|Traceback|Error
+   ^== MULLIGAN|^== TURN.*your turn|^== DISCOVER PENDING|^== UPDATE|^== GAME OVER|^!!|^   |Traceback|Error
    ```
-   Do NOT trigger on opponent turns — stay quiet during them unless the user asks.
+   The `^   ` alternation matters: the indented detail lines under each turn
+   marker (hand, boards, deck-left) ride along in the same notification, so
+   most turns you can advise **directly from the marker block with zero file
+   reads**. Do NOT trigger on opponent turns — stay quiet during them unless
+   the user asks.
    - `^== DISCOVER PENDING` fires mid-turn when the coach's poll lands in the window between a
      Discover choice appearing and you clicking it (best-effort, not guaranteed). Multiple
      simultaneous discovers each fire their own line.
    - `^== UPDATE` fires when the game state changes mid-turn: cards appearing in hand/board
      (discovered, summoned, etc.), or state swings (HP/armor damage, hero attack gained,
-     secrets triggering, weapons). Always arrives within one poll interval (~3s default).
+     secrets triggering, weapons). Always arrives within one poll interval (~1s default).
    - `^!!` means the live view went stale (the game stopped exporting). Tell the user
      immediately, coach from screenshots for the rest of the game, and treat every
      snapshot field as outdated until a fresh `== TURN` marker prints.
-3. On each marker, read the full snapshot JSON:
-   `~/.local/share/hearthstone-tracker/live.json` (or the `--json-file` override).
-   Always re-read it fresh; it is rewritten continuously and the stdout line is
-   just the trigger.
+3. The turn-marker block itself contains the hand (with costs), both boards,
+   your remaining deck, and the opponent's play history — usually everything
+   needed to advise. The full snapshot JSON at
+   `~/.local/share/hearthstone-tracker/live.json` (or the `--json-file`
+   override) adds card rules text and flags; read it only when you need those.
+   When you do read it, always re-read fresh — it is rewritten continuously.
+
+## Response deadline: 15 seconds
+
+The user is on the game's turn timer. Advice must land **within ~15 seconds of
+the turn marker**, or the user starts playing without you and the whole loop is
+decorative. In practice:
+
+- **Advise straight from the marker block.** It carries hand, boards, and deck
+  outs. Reading live.json costs a tool round-trip — spend it only when the
+  block is missing something you actually need (rules text of an unfamiliar
+  card, flags, exact mana). One read maximum; never re-read mid-composition.
+- **If you must read, read once and commit.** No second look, no verifying a
+  hunch. An 80%-confident answer now beats a 95% answer after the user has
+  already moved.
+- **Mid-turn `== UPDATE` events need one line of reaction at most** — usually
+  just confirming the next step of the already-given plan. Don't re-derive the
+  turn.
+- Keep the output format below strictly: one why-sentence, numbered moves.
+  Anything longer is unread by someone on a timer.
 
 ## Per-turn procedure
 
 Work through this checklist before writing anything:
 
-1. **Read the snapshot fresh.** Never advise from a previous turn's data or from
-   what you predicted would happen. The user may not have followed earlier
-   advice; the snapshot is the only truth.
+1. **Advise from current state only.** Never advise from a previous turn's data
+   or from what you predicted would happen. The user may not have followed
+   earlier advice; the marker block (and, if needed, one fresh live.json read)
+   is the only truth.
 2. **Use each card's `type` and `text` fields — never your memory of the card.**
    The snapshot embeds the current rules text precisely because model memory of
    Hearthstone cards is unreliable (sets rotate, cards get patched). A SPELL
