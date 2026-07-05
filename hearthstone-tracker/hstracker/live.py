@@ -96,6 +96,7 @@ def snapshot_delta(prev: dict, curr: dict) -> str | None:
     parts = []
     turn = curr.get("turn")
 
+    # Friendly side: hand/board changes + HP/armor/weapon/secrets
     if my_hand_gained or my_hand_lost or my_board_gained or my_board_lost:
         my_parts = []
         if my_hand_gained:
@@ -109,6 +110,35 @@ def snapshot_delta(prev: dict, curr: dict) -> str | None:
         if my_parts:
             parts.append("my " + ", ".join(my_parts))
 
+    # Friendly side: state changes (HP, armor, weapon, secrets)
+    my_hp_prev = me_prev.get("hp")
+    my_hp_curr = me_curr.get("hp")
+    my_armor_prev = me_prev.get("armor")
+    my_armor_curr = me_curr.get("armor")
+    my_weapon_prev = me_prev.get("weapon")
+    my_weapon_curr = me_curr.get("weapon")
+    my_secrets_prev = me_prev.get("secrets")
+    my_secrets_curr = me_curr.get("secrets")
+
+    if my_hp_prev != my_hp_curr or my_armor_prev != my_armor_curr:
+        hp_change = f"{my_hp_prev}→{my_hp_curr}" if my_hp_prev != my_hp_curr else ""
+        armor_change = f"{my_armor_prev}→{my_armor_curr}" if my_armor_prev != my_armor_curr else ""
+        state_parts = [x for x in [hp_change, armor_change] if x]
+        if state_parts:
+            parts.append("my " + " ".join(state_parts))
+    if (my_weapon_prev is None and my_weapon_curr is not None) or \
+       (my_weapon_prev is not None and my_weapon_curr is None) or \
+       (my_weapon_prev and my_weapon_curr and my_weapon_prev != my_weapon_curr):
+        if my_weapon_curr:
+            durability = my_weapon_curr.get("durability")
+            parts.append(f"my weapon: {my_weapon_curr['name']} {durability} durability")
+        else:
+            parts.append("my weapon: unequipped")
+    if my_secrets_prev != my_secrets_curr:
+        delta = (my_secrets_curr or 0) - (my_secrets_prev or 0)
+        parts.append(f"my secrets {'+' if delta > 0 else ''}{delta}")
+
+    # Opponent side: hand count + board changes
     if opp_hand_count_curr != opp_hand_count_prev or opp_board_gained or opp_board_lost:
         opp_parts = []
         if opp_hand_count_curr != opp_hand_count_prev:
@@ -121,6 +151,34 @@ def snapshot_delta(prev: dict, curr: dict) -> str | None:
         if opp_parts:
             parts.append("opp " + ", ".join(opp_parts))
 
+    # Opponent side: state changes (HP, armor, weapon, secrets)
+    opp_hp_prev = opp_prev.get("hp")
+    opp_hp_curr = opp_curr.get("hp")
+    opp_armor_prev = opp_prev.get("armor")
+    opp_armor_curr = opp_curr.get("armor")
+    opp_weapon_prev = opp_prev.get("weapon")
+    opp_weapon_curr = opp_curr.get("weapon")
+    opp_secrets_prev = opp_prev.get("secrets")
+    opp_secrets_curr = opp_curr.get("secrets")
+
+    if opp_hp_prev != opp_hp_curr or opp_armor_prev != opp_armor_curr:
+        hp_change = f"{opp_hp_prev}→{opp_hp_curr}" if opp_hp_prev != opp_hp_curr else ""
+        armor_change = f"{opp_armor_prev}→{opp_armor_curr}" if opp_armor_prev != opp_armor_curr else ""
+        state_parts = [x for x in [hp_change, armor_change] if x]
+        if state_parts:
+            parts.append("opp " + " ".join(state_parts))
+    if (opp_weapon_prev is None and opp_weapon_curr is not None) or \
+       (opp_weapon_prev is not None and opp_weapon_curr is None) or \
+       (opp_weapon_prev and opp_weapon_curr and opp_weapon_prev != opp_weapon_curr):
+        if opp_weapon_curr:
+            durability = opp_weapon_curr.get("durability")
+            parts.append(f"opp weapon: {opp_weapon_curr['name']} {durability} durability")
+        else:
+            parts.append("opp weapon: unequipped")
+    if opp_secrets_prev != opp_secrets_curr:
+        delta = (opp_secrets_curr or 0) - (opp_secrets_prev or 0)
+        parts.append(f"opp secrets {'+' if delta > 0 else ''}{delta}")
+
     if not parts:
         return None
 
@@ -128,24 +186,28 @@ def snapshot_delta(prev: dict, curr: dict) -> str | None:
     return f"== UPDATE {turn_str} — {' | '.join(parts)}"
 
 
-def pending_discover(
+def pending_discovers(
     tree: Any,
     resolver: HeroClassResolver,
-    friendly_id: int,
-) -> dict | None:
-    """Return unresolved Discover choice details (source + options), or None.
+    friendly_id: int | None,
+) -> list[dict]:
+    """Return all unresolved Discover choice details, or empty list.
 
     Checks for live (unresolved) Choices packets where:
     - type == ChoiceType.GENERAL (Discover, not Mulligan)
     - No matching SendChoices has been received yet
     - Owner matches friendly_id (skip opponent discovers)
 
-    Returns {"source": <name>, "options": [<card>, ...]} if found, else None.
-    Cards in options have {name, cost, type, text} from resolver.card().
+    Returns list of {"choice_id": id, "source": <name>, "options": [<card>, ...]}
+    dicts, one per unresolved friendly-controlled discover. Cards in options
+    have {name, cost, type, text} from resolver.card().
     """
     from hearthstone.enums import ChoiceType
     from hslog.packets import Choices, SendChoices
     from hslog.export import EntityTreeExporter
+
+    if friendly_id is None:
+        return []
 
     try:
         # Build a map of resolved choice ids (those with matching SendChoices)
@@ -153,12 +215,13 @@ def pending_discover(
         for send in tree.recursive_iter(SendChoices):
             resolved_ids.add(send.id)
 
-        # Find unresolved Discovers
+        # Find all unresolved Discovers
         try:
             game = EntityTreeExporter(tree).export().game
         except Exception:
-            return None
+            return []
 
+        results = []
         for choice in tree.recursive_iter(Choices):
             if choice.type != ChoiceType.GENERAL:
                 continue  # Skip non-Discover choices (e.g., Mulligan)
@@ -196,11 +259,15 @@ def pending_discover(
                     pass
 
             if options:
-                return {"source": source_name, "options": options}
+                results.append({
+                    "choice_id": choice.id,
+                    "source": source_name,
+                    "options": options,
+                })
 
-        return None
+        return results
     except Exception:
-        return None
+        return []
 
 
 def snapshot_from_tree(
@@ -253,7 +320,8 @@ def snapshot_from_tree(
         hand: list[dict[str, Any]] = []
         board: list[dict[str, Any]] = []
         deck_remaining = hidden_in_hand = secrets = 0
-        seen_from_deck: dict[str, int] = {}
+        seen_from_deck: dict[str, int] = {}  # cards revealed in other zones
+        seen_in_deck: dict[str, int] = {}  # cards with card_id still in Zone.DECK (revealed)
 
         for entity in game.entities:
             if entity.tags.get(GameTag.CONTROLLER) != pid:
@@ -263,8 +331,11 @@ def snapshot_from_tree(
             card_type = entity.tags.get(GameTag.CARDTYPE)
             zone = entity.zone
 
-            if card_id and zone != Zone.DECK and card_type not in (CardType.HERO, CardType.HERO_POWER):
-                seen_from_deck[card_id] = seen_from_deck.get(card_id, 0) + 1
+            if card_id and card_type not in (CardType.HERO, CardType.HERO_POWER):
+                if zone == Zone.DECK:
+                    seen_in_deck[card_id] = seen_in_deck.get(card_id, 0) + 1
+                elif zone != Zone.DECK:
+                    seen_from_deck[card_id] = seen_from_deck.get(card_id, 0) + 1
 
             if card_type == CardType.HERO and entity.tags.get(GameTag.HEALTH):
                 if zone == Zone.PLAY:
@@ -333,6 +404,12 @@ def snapshot_from_tree(
             "secrets": secrets,
         }
         if side == "me" and deck_counts:
+            # Compute total observed copies of each card across all zones
+            total_seen = {}
+            for card_id in set(list(seen_from_deck.keys()) + list(seen_in_deck.keys())):
+                total_seen[card_id] = seen_from_deck.get(card_id, 0) + seen_in_deck.get(card_id, 0)
+
+            # Cards still in deck (decklist minus what we've seen)
             left = []
             for card_id, count in deck_counts.items():
                 remaining = count - seen_from_deck.get(card_id, 0)
@@ -343,6 +420,19 @@ def snapshot_from_tree(
                                  "type": card.get("type"), "text": card_text(card)})
             left.sort(key=lambda c: (c["cost"] if c["cost"] is not None else 99, c["name"]))
             snapshot[side]["deck_cards_left"] = left
+
+            # Extra cards beyond the decklist (shuffled/generated/created)
+            extra = []
+            for card_id in total_seen:
+                if total_seen[card_id] > deck_counts.get(card_id, 0):
+                    card = resolver.card(card_id)
+                    count = total_seen[card_id] - deck_counts.get(card_id, 0)
+                    extra.append({"name": card.get("name", card_id),
+                                  "cost": card.get("cost"), "count": count,
+                                  "type": card.get("type"), "text": card_text(card)})
+            if extra:
+                extra.sort(key=lambda c: (c["cost"] if c["cost"] is not None else 99, c["name"]))
+                snapshot[side]["deck_extra"] = extra
 
     if "me" not in snapshot or "opp" not in snapshot:
         return None
@@ -370,7 +460,8 @@ class LiveGameTail:
         self.partial = ""
         self.lines: list[str] = []
         self.game_no = 0  # bumps on each CREATE_GAME, so callers can refresh per-game state
-        self.last_tree: Any = None  # stash the last-parsed game tree for pending_discover()
+        self.last_tree: Any = None  # stash the last-parsed game tree for pending_discovers()
+        self.last_friendly_id: int | None = None  # friendly player id, computed once per poll
 
     def poll(self) -> bool:
         """Read new bytes; True if the current-game buffer changed."""
@@ -418,6 +509,11 @@ class LiveGameTail:
         if not parser.games:
             return None
         self.last_tree = parser.games[-1]
+        # Compute friendly_id once, to avoid re-deriving it incorrectly elsewhere
+        try:
+            self.last_friendly_id = FriendlyPlayerExporter(self.last_tree).export()
+        except Exception:
+            self.last_friendly_id = None
         return snapshot_from_tree(
             self.last_tree, resolver,
             names=_player_names(parser), deck_counts=deck_counts,
@@ -482,6 +578,13 @@ def format_snapshot(snap: dict[str, Any]) -> str:
             for c in deck_left
         )
         lines.append(f"   my deck ({me['deck_remaining']} left): {counts}")
+    deck_extra = me.get("deck_extra")
+    if deck_extra:
+        counts = ", ".join(
+            f"{c['name']}({c['cost']})" + (f" x{c['count']}" if c["count"] > 1 else "")
+            for c in deck_extra
+        )
+        lines.append(f"   extra in deck (generated/shuffled): {counts}")
     if opp.get("played"):
         history = ", ".join(
             f"{p['name']}" + (f" x{p['count']}" if p["count"] > 1 else "")

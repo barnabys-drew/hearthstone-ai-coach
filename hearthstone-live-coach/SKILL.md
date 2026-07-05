@@ -27,9 +27,11 @@ got them wrong in live play.
    ```
    Do NOT trigger on opponent turns — stay quiet during them unless the user asks.
    - `^== DISCOVER PENDING` fires mid-turn when the coach's poll lands in the window between a
-     Discover choice appearing and you clicking it (best-effort, not guaranteed).
-   - `^== UPDATE` fires when a card appears mid-turn (discovered, summoned, etc.) via Tier-1 delta
-     detection; always arrives within one poll interval (~3s default).
+     Discover choice appearing and you clicking it (best-effort, not guaranteed). Multiple
+     simultaneous discovers each fire their own line.
+   - `^== UPDATE` fires when the game state changes mid-turn: cards appearing in hand/board
+     (discovered, summoned, etc.), or state swings (HP/armor damage, secrets triggering, weapons).
+     Always arrives within one poll interval (~3s default).
 3. On each marker, read the full snapshot JSON:
    `~/.local/share/hearthstone-tracker/live.json` (or the `--json-file` override).
    Always re-read it fresh; it is rewritten continuously and the stdout line is
@@ -92,14 +94,14 @@ Work through this checklist before writing anything:
   counting incoming damage next turn, treat exhausted minions as full threats, not
   defused ones. This cost a race: I assumed a 14/8 exhausted minion was safe, but it
   attacked twice for 28 damage.
-- **Discover and deathrattle mechanics now surface mid-turn.** Discovers may fire a
+- **Discover and deathrattle mechanics now surface mid-turn.** Discovers fire a
   `== DISCOVER PENDING` marker (Tier 2, best-effort) showing offered options before you
-  click, if the poll lands in that window. More reliably, discovered/summoned cards appear
-  in an `== UPDATE` marker within one poll interval after they land in your hand or board
-  (Tier 1, always fires). Deathrattle results (shuffled cards, summoned tokens) also show
-  up in `== UPDATE` within the next poll. The one residual lag: cards shuffled *into the
-  deck* (Illusory Greenwing dragons) won't show in `deck_cards_left` until you draw them,
-  since that list derives from your decklist, not discovered additions.
+  click, if the poll lands in that window. Multiple simultaneous discovers each fire their
+  own line. More reliably, discovered/summoned cards appear in an `== UPDATE` marker within
+  one poll interval after they land in your hand or board (Tier 1, always fires). Deathrattle
+  results (shuffled cards, summoned tokens) also show up in `== UPDATE` within the next poll.
+  Cards shuffled *into the deck* now appear in `deck_extra` in your snapshot (shown as
+  "generated/shuffled" extras beyond your original decklist count).
 - Advising "play Slam" as if it were a minion — it is a targeted spell and the
   game rejects it with no board. Type/text fields exist so this never recurs.
 - Treating Erupting Volcano as a one-shot AoE spell — it is a LOCATION with a

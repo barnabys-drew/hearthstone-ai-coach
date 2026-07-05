@@ -109,7 +109,7 @@ def cmd_live(args) -> int:
     from .config import DEFAULT_DB
     from .live import (
         LiveGameTail, format_snapshot, write_snapshot_json,
-        snapshot_delta, pending_discover,
+        snapshot_delta, pending_discovers,
     )
 
     log_root = find_log_root(args.logs_root)
@@ -149,21 +149,13 @@ def cmd_live(args) -> int:
                 marker = (str(tail.path), snap["raw_turn"], snap.get("phase"), snap.get("game_over"))
 
                 # Tier 2: Check for pending unresolved Discovers (best-effort)
-                if tail.last_tree:
+                if tail.last_tree and tail.last_friendly_id is not None:
                     try:
-                        friendly_id = None
-                        # Infer friendly player id from the exported snapshot or tree
-                        from .capture import _player_names
-                        names_dict = _player_names(tail.last_tree)
-                        if names_dict:
-                            # Find the player we're tracking (the first one in the game)
-                            if tail.last_tree.players:
-                                friendly_id = tail.last_tree.players[0].player_id
-
-                        if friendly_id is not None:
-                            discover = pending_discover(tail.last_tree, resolver, friendly_id)
-                            if discover and discover["source"] not in seen_discover_ids:
-                                seen_discover_ids.add(discover["source"])
+                        discovers = pending_discovers(tail.last_tree, resolver, tail.last_friendly_id)
+                        for discover in discovers:
+                            choice_id = discover["choice_id"]
+                            if choice_id not in seen_discover_ids:
+                                seen_discover_ids.add(choice_id)
                                 options_str = " | ".join(
                                     opt["name"] for opt in discover.get("options", [])
                                 )
@@ -172,7 +164,7 @@ def cmd_live(args) -> int:
                                     flush=True
                                 )
                     except Exception:
-                        pass  # Silently skip pending_discover errors
+                        pass  # Silently skip pending_discovers errors
 
                 if marker != last_marker:
                     last_marker = marker
