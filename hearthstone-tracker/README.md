@@ -123,6 +123,25 @@ a fresh hslog parser — a single parser fed a multi-game Power.log can raise
 `InconsistentPlayerIdError` when player ids shuffle between games, and
 per-game parsing keeps polls fast (~0.5s) regardless of session length.
 
+### Prefer post-game-only coaching? Skip `hst live` entirely
+
+If turn-by-turn advice is more interruption than help, `hst live` isn't
+needed at all — [`hearthstone-post-game-coach`](../hearthstone-post-game-coach/SKILL.md)
+only needs the tracker database and Power.log, both of which `./hst watch`
+already provides. Run `hst watch` instead (records each completed game,
+no per-turn snapshot spam, no `live.json`), and point a Monitor/tail at its
+own stdout for the completion line it already prints:
+
+```
+[2026-07-05 10:24:22] GT_RANKED Burn Warrior vs HUNTER (opponent#1234): WON in 11 turns
+```
+
+On that line, invoke `hearthstone-post-game-coach` — it pulls the game via
+`./hst stats recent --limit 1` and analyzes from there. This is strictly
+lighter weight than `hst live` (no live JSON writes, no per-turn parsing)
+and is the right choice if you only want the deciding-turn/deck-feedback/
+mechanics-lesson report after each game, not in-the-moment lethal math.
+
 ## Battlegrounds
 
 BG games record final placement (`bg_place`), the hero you picked

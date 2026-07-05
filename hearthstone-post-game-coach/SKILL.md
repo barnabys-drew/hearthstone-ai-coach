@@ -1,6 +1,6 @@
 ---
 name: hearthstone-post-game-coach
-description: Analyze a completed Hearthstone game from the logs. Identify the losing decision, suggest deck tweaks, and coach on game mechanics for the next game. Use this after "== GAME OVER" fires from hearthstone-live-coach.
+description: Analyze a completed Hearthstone game from the logs. Identify the losing decision, suggest deck tweaks, and coach on game mechanics for the next game. Use this after a game ends — triggered by "== GAME OVER" from hearthstone-live-coach, or standalone off "./hst watch"'s own completion line if you're not running live-coach.
 ---
 
 # Hearthstone Post-Game Coach
@@ -9,13 +9,29 @@ After a game ends, read the full game log and tracker database to give structure
 
 Unlike the live-coach (real-time turn-by-turn), this skill analyzes the complete game state ex post facto. You get deeper insight without time pressure.
 
+**This skill does not require `hst live` or `hearthstone-live-coach`.** It only
+needs the tracker database and Power.log, both of which `./hst watch` already
+provides. If you don't want turn-by-turn advice, run `hst watch` instead of
+`hst live` and trigger this skill off watch's own completion line — see
+[Invoking the Skill](#invoking-the-skill) below.
+
 ## When to Use
 
-When the live-coach prints `== GAME OVER: LOST` (or `WON`, for "what went right"):
+**With live-coach running:** when it prints `== GAME OVER: LOST` (or `WON`,
+for "what went right"):
 
 1. Ask the post-game coach: "Analyze game [timestamp] — why did I lose? What should I change?"
 2. The skill reads the game record from the tracker database and Power.log
 3. You get a structured report: deciding turn, deck analysis, mechanics feedback
+
+**Post-game-only (no turn-by-turn advice):** run `./hst watch` in the
+background instead of `hst live`, and watch its stdout for the completion
+line it already prints per game:
+```
+[2026-07-05 10:24:22] GT_RANKED Burn Warrior vs HUNTER (opponent#1234): WON in 11 turns
+```
+On that line, invoke this skill directly — same analysis, no live-coach or
+`hst live` dependency, no per-turn interruptions during the game.
 
 ## What the Skill Does
 
@@ -226,6 +242,16 @@ When the skill digs into a game, verify:
 ```
 
 The skill will query the database, read the logs, and produce the structured report above.
+
+### Post-game-only setup (no `hst live`, no turn-by-turn advice)
+
+```bash
+# Run the lightweight recorder instead of hst live:
+cd hearthstone-tracker && ./hst watch
+```
+Watch its stdout for the completion line it prints per finished game
+(`... WON in N turns` / `... LOST in N turns`). On that line, ask the skill
+the same way as above — it doesn't care whether `hst live` ever ran.
 
 ## See Also
 
