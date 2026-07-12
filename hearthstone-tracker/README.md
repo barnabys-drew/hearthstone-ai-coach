@@ -31,6 +31,8 @@ this up; it can also be added by hand.
 ./hst stats cards --deck "Burn Warrior" --min-games 5
 ./hst stats mulligan --game-type ranked
 ./hst stats recent --limit 10
+./hst rag-report        # lesson-retrieval telemetry: firing rates, dead knowledge, misses
+./hst rag-replay Hearthstone_2026_07_12_04_50_10   # replay a past session against the current lesson store
 ```
 
 Views: `overall`, `deck`, `class`, `matchup`, `first` (going first vs coin),
@@ -38,6 +40,15 @@ Views: `overall`, `deck`, `class`, `matchup`, `first` (going first vs coin),
 rate when kept), `bg` (Battlegrounds placement/hero stats), `bg-heroes`
 (hero offer/pick rates), `recent`. The card views accept `--deck <substring>`
 to scope to one deck.
+
+Retrieval telemetry (`docs/progressive-rag.md` Phase 1): `hst live` appends
+one event per your-turn to `~/.local/share/hearthstone-tracker/retrieval_log.jsonl`
+recording which triggered lessons fired (or that none did), plus a game
+outcome event. `hst rag-report` turns that log into per-lesson firing rates,
+dead knowledge, retrieval misses, and a precision proxy; `hst rag-replay
+<session-dir>` re-runs the current lesson store against a past session's
+Power.logs (deterministic — diff two `--json` runs to regression-test a store
+change). Replay never writes the live log.
 
 Example:
 

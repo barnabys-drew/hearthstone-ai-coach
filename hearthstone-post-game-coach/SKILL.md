@@ -275,6 +275,12 @@ Pick the most concrete trigger available (a card name beats a class; a class
 beats nothing). A lesson without a nameable trigger belongs in lessons.md
 prose instead.
 
+Record the lesson promptly — within ~30 minutes of the game ending. New
+lessons emit an `ingest` event into the retrieval telemetry log, joined to
+the just-finished game by timestamp; `hst rag-report` uses that join to find
+games where a misplay happened but retrieval fired nothing (the miss backlog
+that gates the later RAG phases).
+
 Additionally, after each session (or when patterns shift), refresh the ONE
 synthesized cross-game headline shown at the top of the overlay lessons
 panel: a record with `"headline": true` summarizing what wins and loses

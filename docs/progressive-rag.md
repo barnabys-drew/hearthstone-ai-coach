@@ -28,22 +28,30 @@ the same discipline a high-volume alert queue forces: anything on the hot
 path must be deterministic and effectively free; anything expensive runs at
 boundaries and is cached.
 
-## Phase 1 — Retrieval telemetry + eval harness
+## Phase 1 — Retrieval telemetry + eval harness ✅ BUILT (2026-07-12)
 
 *The part everyone skips, and the part that matters most at work.*
 
-Build:
+Built (`hstracker/raglog.py`, `hstracker/ragreplay.py`):
 - `retrieval_log.jsonl` — one event per your-turn snapshot: stable lesson ids
-  (hash of lesson text), which tiers ran, what matched, game id and turn.
-- Outcome joining — post-game, attach the game result and whether the coach
-  actually applied each fired lesson.
+  (sha1 of normalized text, 12 hex chars), tiers ran, what matched (or that
+  nothing did), weak game key (session + game_no) and turn. Events: `corpus`,
+  `match`, `outcome`, `ingest` (new lesson recorded), `applied` (coach acked
+  using a fired lesson via `coach_publish.py --applied-lesson "#<id>"`).
+- Outcome joining — the live loop appends an `outcome` event at game over;
+  cross-process `ingest`/`applied` events join by timestamp windows.
 - `hst rag-report` — per-lesson firing rate; dead knowledge (records that
-  never fire); retrieval misses (turns with misplays but zero matches — the
-  evidence backlog that justifies or kills every later phase); a precision
-  proxy (fired AND applied AND game won).
-- `hst rag-replay <session-dir>` — run the current store against historical
-  Power.logs offline (reusing `LiveGameTail`), so any retrieval change can be
-  regression-tested against real past games before it goes live.
+  never fire, untriggerable ones flagged); retrieval misses (games with a
+  recorded misplay but zero fires — the evidence backlog that justifies or
+  kills every later phase); a precision proxy (fired AND applied AND won,
+  degrading to fired-AND-won when no applied events exist).
+- `hst rag-replay <session-dir>` — runs the current store against historical
+  Power.logs offline (reusing `LiveGameTail.snapshot`), deterministic
+  `--json` output for diff-based regression tests. Never writes the live log.
+
+First replay over a real session (13 games) already produced gate evidence:
+several never-fired lessons and one lesson firing on 43 turns across 10
+games — trigger specificity work before any new tier.
 
 Teaches: retrieval evaluation, hit/miss telemetry, offline replay,
 knowledge-decay detection.
@@ -129,6 +137,24 @@ value of context.
 
 SOC transfer: a per-alert token budget is the primary cost lever for an LLM
 triage agent at volume; ranking evidence under that budget is the craft.
+
+## Standing constraints (apply to every phase)
+
+Not phases of their own — invariants the whole stack must respect, recorded
+here so they survive across sessions:
+
+- **Deck tracking must stay accurate with no AI in the loop.** When the coach
+  is out of credits (or simply not running), `hst live`/`hst watch` tracking,
+  the overlay panels, and game recording must keep working correctly — the
+  deterministic layer never depends on the LLM layer.
+- **Make the model in use visible.** It should be easy to tell which AI
+  model/CLI is currently coaching (e.g. surfaced in the advice payload or a
+  panel footer), so behavior differences and credit burn are attributable.
+- **Log every game for RAG, not just coached ones.** Telemetry and game
+  capture should cover all games played — including sessions where nobody is
+  actively "playing to learn" — so the eval corpus grows passively. If the
+  live loop isn't running, backfill (`hst backfill`) plus replay
+  (`hst rag-replay`) should be able to reconstruct the missing telemetry.
 
 ## Build order and the meta-lesson
 

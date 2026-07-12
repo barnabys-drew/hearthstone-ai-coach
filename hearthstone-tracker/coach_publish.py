@@ -67,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--discover", help="Discover pick line ('Pick X — reason'). Alone, it merges into the current advice card instead of replacing it.")
     parser.add_argument("--lesson", action="append", help="Recurring-lesson line for the overlay lessons box; repeat for multiple")
     parser.add_argument("--lesson-record", help="JSON Lesson record with trigger conditions; appends to the tracker's lesson store so it fires in future turn markers. Example: '{\"lesson\":\"one-hit or leave it\",\"trigger\":{\"enemy_board\":[\"Bloodhoof Brave\"]},\"cost\":\"7 face\"}'")
+    parser.add_argument("--applied-lesson", action="append", help="A fired lesson this advice actually used: the 12-hex id from the turn marker (#abc123def456) or the exact lesson text; repeat for multiple. Feeds the rag-report precision proxy.")
     parser.add_argument("--lethal-math", help="Marks the payload as lethal and displays this arithmetic")
     parser.add_argument("--game-over", choices=["WON", "LOST", "TIED", "UNKNOWN"])
     parser.add_argument("--mulligan-json", help="JSON array of {card, keep, reason} rows")
@@ -76,6 +77,15 @@ def main(argv: list[str] | None = None) -> int:
         from hstracker.lessons import append_lesson
         path = append_lesson(json.loads(args.lesson_record))
         print(path)
+        if not (args.json or args.headline or args.step or args.mulligan_json or args.discover or args.clear or args.applied_lesson):
+            return 0
+
+    if args.applied_lesson:
+        import re
+        from hstracker.raglog import append_event, lesson_id
+        ids = [v.lstrip("#") if re.fullmatch(r"#?[0-9a-f]{12}", v) else lesson_id(v)
+               for v in args.applied_lesson]
+        append_event({"ev": "applied", "lesson_ids": ids, "turn": args.turn})
         if not (args.json or args.headline or args.step or args.mulligan_json or args.discover or args.clear):
             return 0
 

@@ -112,6 +112,18 @@ def append_lesson(lesson: Lesson | dict[str, Any], path: Path | None = None) -> 
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(payload, indent=1), encoding="utf-8")
     os.replace(tmp, path)
+    if path == STORE_PATH:
+        # New knowledge entered the real store — tell the retrieval log so
+        # rag-report can spot games with misplays that retrieval missed.
+        # Gated to the default path so tests and ad-hoc stores stay silent.
+        try:
+            from .raglog import append_event, lesson_id
+            append_event({"ev": "ingest", "lesson_id": lesson_id(record.lesson),
+                          "source": record.source, "deck": record.deck,
+                          "matchup": record.matchup,
+                          "conds": record.trigger.condition_count()})
+        except Exception:
+            pass
     mirror_store(path)
     return path
 

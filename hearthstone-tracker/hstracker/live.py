@@ -648,7 +648,9 @@ def format_snapshot(snap: dict[str, Any]) -> str:
             lines.append(f"   lessons matched ({len(matched)}) — past misplays relevant RIGHT NOW:")
             for item in matched:
                 cost = f" [cost last time: {item['cost']}]" if item.get("cost") else ""
-                lines.append(f"     {item['lesson']}{cost}")
+                # The #id lets the coach ack usage: coach_publish --applied-lesson #<id>
+                ref = f"  #{item['id']}" if item.get("id") else ""
+                lines.append(f"     {item['lesson']}{cost}{ref}")
     deck_left = me.get("deck_cards_left")
     if deck_left:
         counts = ", ".join(

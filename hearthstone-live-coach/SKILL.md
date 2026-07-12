@@ -168,6 +168,11 @@ Two more publish forms:
   latency; hits appear in the turn marker as `lessons matched (N)` lines and
   on the overlay lessons panel in red. Prefer a trigger record over a plain
   `--lesson` whenever the mistake has a concrete cause you can name.
+- **Ack lessons you actually used**: each matched-lesson line in the marker
+  ends with a `#<12-hex-id>` tag. When your advice genuinely follows a fired
+  lesson, add `--applied-lesson "#<id>"` (repeatable) to that turn's publish.
+  This feeds retrieval telemetry (`hst rag-report`'s precision proxy) — skip
+  it when the lesson didn't change your advice.
 
 Publish order under time pressure: chat advice FIRST, overlay publish second
 (or in the same tool batch). The overlay is a display, never the blocker.

@@ -1,4 +1,4 @@
-"""Command-line interface: backfill, watch, stats."""
+"""Command-line interface: backfill, watch, live, stats, rag-report, rag-replay."""
 from __future__ import annotations
 
 import argparse
@@ -109,15 +109,18 @@ def _current_deck_counts(session_dir, resolver) -> dict[str, int] | None:
     return counts or None
 
 
-def _record_game_and_refresh_stats(session_dir, resolver, overlay_dir) -> None:
+def _record_game_and_refresh_stats(session_dir, resolver, overlay_dir) -> list | None:
     """On game end: persist the finished game and refresh the stats panel.
 
     Best-effort — the live loop must never die over stats bookkeeping.
+    Returns the records parsed from the newest Power.log so callers (rag
+    telemetry) can attach outcome details; None on failure or startup call.
     """
     try:
         from .db import connect, save_games
         from .deckstats import write_deck_stats
 
+        last_records = None
         conn = connect(resolve_db_path(None))
         if session_dir:
             deck_events = [ev for path in deck_logs(session_dir) for ev in parse_decks_log(path)]
@@ -125,10 +128,14 @@ def _record_game_and_refresh_stats(session_dir, resolver, overlay_dir) -> None:
                 records = parse_power_log(path, resolver)
                 attach_decks(records, deck_events)
                 save_games(conn, records)
+                if records:
+                    last_records = records
         write_deck_stats(conn, overlay_dir)
         conn.close()
+        return last_records
     except Exception as exc:
         print(f"!! deck stats refresh failed: {exc}", flush=True)
+        return None
 
 
 def cmd_live(args) -> int:
@@ -141,12 +148,14 @@ def cmd_live(args) -> int:
     )
     from .lessons import StoreWatcher, match_lessons, mirror_store
     from .overlay import mirror_live_snapshot, resolve_overlay_dir
+    from .raglog import RagTurnLogger, lesson_id
 
     log_root = find_log_root(args.logs_root)
     json_file = Path(args.json_file) if args.json_file else DEFAULT_DB.parent / "live.json"
     overlay_dir = resolve_overlay_dir(args.overlay_dir)
     resolver = HeroClassResolver()
     lesson_store = StoreWatcher()  # mtime-cached; new lessons picked up mid-game
+    rag = RagTurnLogger()  # retrieval telemetry (progressive-RAG Phase 1)
     mirror_store()  # give the overlay lessons panel the structured store at startup
     _record_game_and_refresh_stats(None, resolver, overlay_dir)  # stats panel at startup
 
@@ -159,6 +168,7 @@ def cmd_live(args) -> int:
     last_snap = None  # for snapshot_delta comparisons
     seen_discover_ids = set()  # to avoid re-printing the same pending choice
     deck_counts = None
+    deck_name = None
     deck_game_no = -1
     snap_failing = False  # warn once (not every poll) if snapshots stop exporting
 
@@ -179,12 +189,13 @@ def cmd_live(args) -> int:
                 # A new game began; re-read Decks.log for the deck just queued.
                 deck_game_no = tail.game_no
                 deck_counts = _current_deck_counts(current_dir, resolver)
+                deck_name = _current_deck_name(current_dir)
                 # Stats panel follows the deck you QUEUED with, from game start.
                 try:
                     from .db import connect
                     from .deckstats import write_deck_stats
                     conn = connect(resolve_db_path(None))
-                    write_deck_stats(conn, overlay_dir, _current_deck_name(current_dir))
+                    write_deck_stats(conn, overlay_dir, deck_name)
                     conn.close()
                 except Exception:
                     pass
@@ -202,8 +213,11 @@ def cmd_live(args) -> int:
                 matched = match_lessons(snap, lesson_store.lessons())
                 if matched:
                     snap["lessons_matched"] = [
-                        {"lesson": rec.lesson, "cost": rec.cost} for rec in matched
+                        {"lesson": rec.lesson, "cost": rec.cost, "id": lesson_id(rec.lesson)}
+                        for rec in matched
                     ]
+                rag.on_snapshot(snap, matched, lesson_store.lessons(),
+                                session=current_dir.name, game_no=tail.game_no)
                 write_snapshot_json(snap, json_file)
                 if overlay_dir:
                     try:
@@ -242,7 +256,10 @@ def cmd_live(args) -> int:
                         and snap.get("game_over")
                     ):
                         print(f"== GAME OVER: {snap['game_over']}", flush=True)
-                        _record_game_and_refresh_stats(current_dir, resolver, overlay_dir)
+                        records = _record_game_and_refresh_stats(current_dir, resolver, overlay_dir)
+                        rag.on_game_over(snap, records[-1] if records else None,
+                                         session=current_dir.name,
+                                         game_no=tail.game_no, deck_name=deck_name)
                         last_marker = marker
                         last_snap = snap
                         if args.once:
@@ -345,6 +362,71 @@ def cmd_stats(args) -> int:
     return 0
 
 
+def cmd_rag_report(args) -> int:
+    from . import raglog
+    from .lessons import load_store
+
+    events = raglog.read_events(Path(args.log) if args.log else None)
+    if args.days:
+        import time
+        cutoff = time.time() - args.days * 86400
+        events = [ev for ev in events if (ev.get("ts") or 0) >= cutoff]
+    if not events:
+        print("No retrieval telemetry yet — play a game with `hst live` running.")
+        return 0
+
+    store = load_store()
+    games = raglog.join_games(events)
+
+    precision, has_applied = raglog.precision_rows(games, store)
+    sections = [
+        ("Summary", raglog.summary_rows(games)),
+        ("Per-lesson firing", raglog.fire_rows(games, store)),
+        ("Dead knowledge (never fired)", raglog.dead_rows(games, store)),
+        ("Retrieval misses (misplay recorded, nothing fired)", raglog.miss_rows(games)),
+        ("Precision proxy" if has_applied
+         else "Precision proxy (no applied events — proxy is fired∧won)", precision),
+    ]
+    for title, rows in sections:
+        print(f"## {title}")
+        print(stats_mod.format_table(rows))
+        print()
+    stray = raglog.unjoined_counts(games)
+    if stray["applied"] or stray["ingested"]:
+        print(f"(unjoined events: {stray['applied']} applied, {stray['ingested']} ingested "
+              f"— outside their join windows)")
+    return 0
+
+
+def cmd_rag_replay(args) -> int:
+    import json
+
+    from .lessons import load_store
+    from .ragreplay import replay_session, replay_report
+
+    session = Path(args.session_dir)
+    if not session.is_absolute():
+        session = find_log_root(args.logs_root) / args.session_dir
+    if not session.is_dir():
+        print(f"ERROR: no such session directory: {session}", file=sys.stderr)
+        return 2
+
+    store = load_store()
+    resolver = HeroClassResolver()
+    events = replay_session(session, store, resolver)
+
+    if args.json:
+        for ev in events:
+            print(json.dumps(ev, separators=(",", ":"), sort_keys=True))
+    else:
+        replay_report(events, store, print)
+    if args.log:
+        from .raglog import append_event
+        for ev in events:
+            append_event(dict(ev), Path(args.log))
+    return 0
+
+
 def main(argv=None) -> int:
     logging.disable(logging.WARNING)  # hslog is chatty about known log quirks
 
@@ -380,6 +462,18 @@ def main(argv=None) -> int:
     p.add_argument("--min-games", type=int, default=1, help="Minimum games/samples per row")
     p.add_argument("--limit", type=int, default=20, help="Rows for the recent view")
     p.set_defaults(func=cmd_stats)
+
+    p = sub.add_parser("rag-report", help="Retrieval telemetry: firing rates, dead knowledge, misses")
+    p.add_argument("--log", help="Retrieval log path (default: retrieval_log.jsonl next to the DB)")
+    p.add_argument("--days", type=int, help="Only events from the last N days")
+    p.set_defaults(func=cmd_rag_report)
+
+    p = sub.add_parser("rag-replay", help="Run the current lesson store against a historical session's Power.logs")
+    p.add_argument("session_dir", help="Session dir name (Hearthstone_YYYY_...) or absolute path")
+    p.add_argument("--logs-root", help="Hearthstone Logs directory (auto-detected by default)")
+    p.add_argument("--json", action="store_true", help="Emit raw events as JSON lines (for diff-based regression tests)")
+    p.add_argument("--log", help="Also append the replayed events to this JSONL file (never the live log)")
+    p.set_defaults(func=cmd_rag_replay)
 
     args = parser.parse_args(argv)
     try:
