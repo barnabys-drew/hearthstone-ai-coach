@@ -133,8 +133,12 @@ def fetch_text(url: str, *, cookie: str | None = None,
     headers = {"User-Agent": USER_AGENT, "Accept": "application/json,text/plain,*/*"}
     if cookie:
         headers["Cookie"] = cookie
+    # file:// is supported deliberately (offline/local collection exports);
+    # everything else is restricted to http(s).
+    if not url.lower().startswith(("http://", "https://", "file://")):
+        raise ValueError(f"collection URL must be http(s) or file, got: {url[:40]}")
     request = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(request, timeout=30) as response:
+    with urllib.request.urlopen(request, timeout=30) as response:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected -- user-supplied on their own CLI; scheme allowlisted above
         return read_limited(response, max_bytes, url).decode("utf-8")
 
 

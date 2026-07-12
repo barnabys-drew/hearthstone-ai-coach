@@ -65,7 +65,7 @@ class OverlayHandler(BaseHTTPRequestHandler):
         if not cache.is_file():
             try:
                 cache.parent.mkdir(parents=True, exist_ok=True)
-                with urllib.request.urlopen(ART_REMOTE.format(card_id=card_id), timeout=10) as resp:
+                with urllib.request.urlopen(ART_REMOTE.format(card_id=card_id), timeout=10) as resp:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected -- constant host, card_id regex-gated
                     body = resp.read()
                 tmp = cache.with_suffix(".tmp")
                 tmp.write_bytes(body)

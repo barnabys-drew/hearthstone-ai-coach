@@ -260,7 +260,7 @@ def load_cards(path: str | None, *, allow_fetch: bool) -> list[dict[str, Any]]:
         HJSON_LATEST_COLLECTIBLE,
         headers={"User-Agent": "hearthstone-deck-builder-skill/1.0 (+https://hearthstonejson.com)"},
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
+    with urllib.request.urlopen(request, timeout=30) as response:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected -- HJSON_LATEST_COLLECTIBLE is a module constant
         data = response.read(MAX_CARDS_RESPONSE_BYTES + 1)
     if len(data) > MAX_CARDS_RESPONSE_BYTES:
         raise ValueError(

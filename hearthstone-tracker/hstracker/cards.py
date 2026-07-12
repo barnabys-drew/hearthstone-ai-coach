@@ -24,7 +24,7 @@ _HERO_NN_CLASS = {
 def _download_cards() -> list[dict] | None:
     try:
         req = urllib.request.Request(CARDS_URL, headers={"User-Agent": "hearthstone-tracker/0.1"})
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected -- CARDS_URL is a module constant
             data = resp.read(MAX_CARDS_BYTES)
         cards = json.loads(data)
         CACHE.parent.mkdir(parents=True, exist_ok=True)

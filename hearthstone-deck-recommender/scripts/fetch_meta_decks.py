@@ -55,8 +55,10 @@ TITLE_RE = re.compile(r"<title>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
 
 def fetch(url: str, timeout: int = 30) -> str:
+    if not url.lower().startswith(("http://", "https://")):
+        raise ValueError(f"URL must be http(s), got: {url[:40]}")
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with urllib.request.urlopen(request, timeout=timeout) as response:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected -- scheme validated above
         data = response.read(MAX_PAGE_BYTES + 1)
     if len(data) > MAX_PAGE_BYTES:
         raise ValueError(
