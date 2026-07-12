@@ -1,6 +1,13 @@
-# Hearthstone Deck Recommender
+# Hearthstone AI Coach
 
-> A zero-dependency CLI that tells you the cheapest competitive Hearthstone deck to craft from your collection — with optional AI-agent skills layered on top.
+> A model-agnostic AI coaching stack for Hearthstone: real-time turn-by-turn
+> coaching over the game's own logs, a native five-panel overlay (advice, deck
+> tracker, opponent tracker, lessons, deck stats), a trigger-matched lessons
+> engine that learns from your misplays — plus the deck recommender/builder
+> CLI tools it grew from. Doubles as a hands-on lab for progressive,
+> cost-conscious RAG ([docs/progressive-rag.md](docs/progressive-rag.md)).
+>
+> *Formerly `hearthstone-deck-recommender` — old GitHub URLs redirect.*
 
 ## Why this exists
 
@@ -11,7 +18,7 @@ collection was already closest to finishing**. This tool answers exactly that: i
 compares your collection against current top Standard decks, ranks them by the dust
 you'd actually have to spend, and hands you a ready-to-import deck code.
 
-[![CI](https://github.com/barnabys-drew/hearthstone-deck-recommender/actions/workflows/ci.yml/badge.svg)](https://github.com/barnabys-drew/hearthstone-deck-recommender/actions/workflows/ci.yml)
+[![CI](https://github.com/barnabys-drew/hearthstone-ai-coach/actions/workflows/ci.yml/badge.svg)](https://github.com/barnabys-drew/hearthstone-ai-coach/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 ![Dependencies: standard library only](https://img.shields.io/badge/dependencies-standard%20library%20only-brightgreen)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -192,8 +199,8 @@ the AI skills call).
 ## Quick start (no AI required)
 
 ```bash
-git clone https://github.com/barnabys-drew/hearthstone-deck-recommender.git
-cd hearthstone-deck-recommender
+git clone https://github.com/barnabys-drew/hearthstone-ai-coach.git
+cd hearthstone-ai-coach
 python3 -m unittest discover -s tests
 ```
 

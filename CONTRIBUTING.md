@@ -5,8 +5,8 @@ Thanks for considering a contribution. This project is intentionally small and d
 ## Development setup
 
 ```bash
-git clone https://github.com/barnabys-drew/hearthstone-deck-recommender.git
-cd hearthstone-deck-recommender
+git clone https://github.com/barnabys-drew/hearthstone-ai-coach.git
+cd hearthstone-ai-coach
 python3 -m unittest discover -s tests
 ```
 
