@@ -9,8 +9,10 @@ if (!window.overlayAPI) {
       if (!r.ok) throw new Error(`${fileName}: HTTP ${r.status}`);
       return r.json();
     }),
+    artPath: (cardId) => Promise.resolve(`/art/${encodeURIComponent(cardId)}.png`),
     setClickThrough: () => {},
     onState: (callback) => callback({ clickThrough: false, opacity: 1 }),
+    onFileChanged: () => {}, // browser mode has no watcher; polling covers it
   };
   document.addEventListener('DOMContentLoaded', () => {
     const state = document.getElementById('overlay-state');

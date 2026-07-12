@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -25,6 +27,8 @@ from hstracker.overlay import resolve_overlay_dir  # noqa: E402
 RENDERER_DIR = Path(__file__).resolve().parent / "renderer"
 DATA_FILES = {"live.json", "advice.json", "lessons.json"}
 MIME = {".html": "text/html", ".js": "text/javascript", ".css": "text/css"}
+ART_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+ART_REMOTE = "https://art.hearthstonejson.com/v1/tiles/{card_id}.png"
 
 
 class OverlayHandler(BaseHTTPRequestHandler):
@@ -33,6 +37,12 @@ class OverlayHandler(BaseHTTPRequestHandler):
     stale_advice_seconds: int
 
     def do_GET(self) -> None:  # noqa: N802 (stdlib naming)
+        # Reject non-local Host headers: blocks DNS-rebinding pages from
+        # reading game state, and keeps this safe-by-default if anyone ever
+        # changes the bind address away from loopback.
+        host = (self.headers.get("Host") or "").split(":", 1)[0].lower()
+        if host not in ("localhost", "127.0.0.1", "[::1]", ""):
+            return self._send_error(403, "forbidden host")
         path = self.path.split("?", 1)[0]
         if path == "/config":
             self._send_json({
@@ -42,8 +52,33 @@ class OverlayHandler(BaseHTTPRequestHandler):
             })
         elif path.startswith("/data/"):
             self._send_data(path.removeprefix("/data/"))
+        elif path.startswith("/art/"):
+            self._send_art(path.removeprefix("/art/").removesuffix(".png"))
         else:
             self._send_static("index.html" if path == "/" else path.lstrip("/"))
+
+    def _send_art(self, card_id: str) -> None:
+        """Serve a card-art tile, caching it on disk so rows work offline."""
+        if not ART_ID_RE.match(card_id):
+            return self._send_error(404, "bad card id")
+        cache = self.overlay_dir / "art-cache" / f"{card_id}.png"
+        if not cache.is_file():
+            try:
+                cache.parent.mkdir(parents=True, exist_ok=True)
+                with urllib.request.urlopen(ART_REMOTE.format(card_id=card_id), timeout=10) as resp:
+                    body = resp.read()
+                tmp = cache.with_suffix(".tmp")
+                tmp.write_bytes(body)
+                tmp.replace(cache)
+            except OSError as exc:
+                return self._send_error(502, f"art fetch failed: {exc}")
+        body = cache.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "max-age=604800")
+        self.end_headers()
+        self.wfile.write(body)
 
     def _send_data(self, file_name: str) -> None:
         if file_name not in DATA_FILES:

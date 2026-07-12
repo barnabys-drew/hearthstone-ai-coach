@@ -1,5 +1,6 @@
-const { app, BrowserWindow, globalShortcut, ipcMain } = require('electron');
+const { app, BrowserWindow, globalShortcut, ipcMain, net } = require('electron');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const appDir = __dirname;
@@ -8,9 +9,10 @@ const configPath = path.join(appDir, 'config.json');
 // Four standalone always-on-top panels; each has its own saved bounds and
 // visibility, and every one is draggable + resizable on all four edges.
 const PANELS = ['advice', 'deck', 'opponent', 'lessons'];
+const DATA_FILES = ['live.json', 'advice.json', 'lessons.json'];
 
 const defaults = {
-  overlayDir: process.env.HS_OVERLAY_DIR_WIN || 'C:/Users/drewt/hs-overlay',
+  overlayDir: process.env.HS_OVERLAY_DIR_WIN || path.join(os.homedir(), 'hs-overlay'),
   opacity: 0.94,
   pollMs: 250,
   staleAdviceSeconds: 75,
@@ -111,6 +113,9 @@ function createPanel(name) {
       nodeIntegration: false,
     },
   });
+  // Defense-in-depth: panels render local files only — never navigate or pop up.
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', (event) => event.preventDefault());
   win.setAlwaysOnTop(true, 'screen-saver');
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.setOpacity(Number(config.opacity || 0.94));
@@ -191,14 +196,61 @@ function registerHotkeys() {
   registerHotkey(h.toggleLessons, () => togglePanel('lessons'));
 }
 
+// Push, don't poll: watch the shared folder and nudge only the affected
+// renderers when a data file lands. Renderers keep a slow fallback poll in
+// case a watch event is ever missed.
+let watchDebounce = new Map();
+
+function watchOverlayDir() {
+  try {
+    fs.mkdirSync(config.overlayDir, { recursive: true });
+    fs.watch(config.overlayDir, (_eventType, fileName) => {
+      if (!fileName || !DATA_FILES.includes(fileName)) return;
+      clearTimeout(watchDebounce.get(fileName));
+      // Tiny debounce: atomic replace can fire multiple events per write.
+      watchDebounce.set(fileName, setTimeout(() => broadcast('overlay-file-changed', fileName), 40));
+    });
+  } catch (error) {
+    console.warn('fs.watch unavailable, renderers fall back to polling:', error.message);
+  }
+}
+
+// Card-art tiles cached on disk so rows render instantly and offline.
+const ART_CACHE_DIR = path.join(appDir, 'art-cache');
+const artDownloads = new Set();
+
+ipcMain.handle('card-art', (_event, cardId) => {
+  if (!/^[A-Za-z0-9_.-]+$/.test(String(cardId))) return null;
+  const cached = path.join(ART_CACHE_DIR, `${cardId}.png`);
+  if (fs.existsSync(cached)) return `file://${cached.replaceAll('\\', '/')}`;
+  const remote = `https://art.hearthstonejson.com/v1/tiles/${cardId}.png`;
+  if (!artDownloads.has(cardId)) {
+    artDownloads.add(cardId);
+    fs.mkdirSync(ART_CACHE_DIR, { recursive: true });
+    const request = net.request(remote);
+    request.on('response', (response) => {
+      if (response.statusCode !== 200) return;
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => fs.writeFile(`${cached}.tmp`, Buffer.concat(chunks), (err) => {
+        if (!err) fs.rename(`${cached}.tmp`, cached, () => {});
+      }));
+    });
+    request.on('error', () => artDownloads.delete(cardId));
+    request.end();
+  }
+  return remote; // serve the remote URL this time; the cache hits next render
+});
+
 ipcMain.handle('overlay-config', () => ({
   overlayDir: config.overlayDir,
   pollMs: config.pollMs,
   staleAdviceSeconds: config.staleAdviceSeconds,
+  push: true,
 }));
 
 ipcMain.handle('read-json', async (_event, fileName) => {
-  if (!['live.json', 'advice.json', 'lessons.json'].includes(fileName)) {
+  if (!DATA_FILES.includes(fileName)) {
     throw new Error(`Unsupported overlay file: ${fileName}`);
   }
   const filePath = path.join(config.overlayDir, fileName);
@@ -212,6 +264,7 @@ ipcMain.handle('set-click-through', (_event, value) => setClickThrough(Boolean(v
 app.whenReady().then(() => {
   for (const name of PANELS) wins[name] = createPanel(name);
   registerHotkeys();
+  watchOverlayDir();
 });
 
 app.on('window-all-closed', () => {

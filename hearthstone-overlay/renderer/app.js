@@ -10,21 +10,40 @@ let advice = null;
 let lessonsDoc = null;
 let deckSeen = new Map(); // card key -> last seen copies-left, to flash changed rows
 
+// Card art: resolved through the host (Electron disk cache / serve.py cache),
+// falling back to the remote tile URL until the cached copy exists.
 const ART_URL = (id) => `https://art.hearthstonejson.com/v1/tiles/${encodeURIComponent(id)}.png`;
+const artCache = new Map(); // card id -> resolved url
+let artRenderQueued = false;
+
+function resolveArt(id) {
+  if (artCache.has(id)) return artCache.get(id);
+  artCache.set(id, ART_URL(id));
+  Promise.resolve(window.overlayAPI.artPath(id)).then((resolved) => {
+    if (resolved && resolved !== artCache.get(id)) {
+      artCache.set(id, resolved);
+      if (!artRenderQueued) {
+        artRenderQueued = true;
+        setTimeout(() => { artRenderQueued = false; render(); }, 120);
+      }
+    }
+  }).catch(() => {});
+  return artCache.get(id);
+}
 
 function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 function setHidden(node, hidden) { node.classList.toggle('hidden', hidden); }
 
 function artStyle(card) {
-  if (!card.id) return '';
-  return ` style="background-image: linear-gradient(90deg, rgba(24,25,30,.96) 38%, rgba(24,25,30,.55) 70%, rgba(24,25,30,.25)), url('${ART_URL(card.id)}')"`;
+  if (!card.id || !/^[A-Za-z0-9_.-]+$/.test(String(card.id))) return '';
+  return ` style="background-image: linear-gradient(90deg, rgba(24,25,30,.96) 38%, rgba(24,25,30,.55) 70%, rgba(24,25,30,.25)), url('${resolveArt(card.id)}')"`;
 }
 
 function cardRow(card, { left = null, remaining = 0 } = {}) {
-  const copies = left ?? Number(card.count || 1);
+  const copies = Number(left ?? card.count ?? 1);
   const gone = copies === 0;
   const key = `${card.name}|${card.cost}`;
   const prev = deckSeen.get(key);
@@ -159,8 +178,15 @@ async function boot() {
     }
     document.body.classList.toggle('movable', !state.clickThrough);
   });
+  // Push-first: the main process watches the shared folder and nudges us on
+  // writes; the interval is only a fallback (slow in push mode).
+  window.overlayAPI.onFileChanged(async (fileName) => {
+    if ((FILES_BY_PANEL[panel] || FILES_BY_PANEL.all).includes(fileName)) {
+      if (await pollFile(fileName)) render();
+    }
+  });
   render();
-  setInterval(tick, Number(config.pollMs || 250));
+  setInterval(tick, config.push ? 2000 : Number(config.pollMs || 250));
   tick();
 }
 

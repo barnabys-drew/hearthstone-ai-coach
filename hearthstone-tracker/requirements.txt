@@ -1,1 +1,2 @@
 hslog>=1.18
+pydantic>=2

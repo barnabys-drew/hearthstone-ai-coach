@@ -12,11 +12,11 @@ follow the exact commands, the quoting workarounds matter.
 ## Architecture (10-second version)
 
 - WSL: `coach_feed.sh` runs `hst live`, which mirrors `live.json` into the
-  shared folder `/mnt/c/Users/drewt/hs-overlay` (Windows:
-  `C:\Users\drewt\hs-overlay`).
+  shared folder `/mnt/c/Users/$WINUSER/hs-overlay` (Windows:
+  `C:\Users\%WINUSER%\hs-overlay`).
 - WSL: `coach_publish.py` writes `advice.json` (turn plans, discover picks)
   and `lessons.json` (accumulating coaching lessons) into the same folder.
-- Windows: an Electron app (copied to `C:\Users\drewt\hearthstone-overlay`)
+- Windows: an Electron app (copied to `C:\Users\%WINUSER%\hearthstone-overlay`)
   polls those files and renders four standalone always-on-top panels.
 
 ## Start procedure
@@ -28,7 +28,7 @@ follow the exact commands, the quoting workarounds matter.
    <repo>/hearthstone-tracker/coach_feed.sh
    ```
 
-   Verify its startup lines include `Overlay mirror: /mnt/c/Users/drewt/hs-overlay`.
+   Verify its startup lines include `Overlay mirror: /mnt/c/Users/$WINUSER/hs-overlay`.
    If that line is missing, the running code predates the overlay — the feed
    restart just fixed it.
 
@@ -38,11 +38,11 @@ follow the exact commands, the quoting workarounds matter.
    ```bash
    cp <repo>/hearthstone-overlay/main.js <repo>/hearthstone-overlay/preload.js \
       <repo>/hearthstone-overlay/package.json <repo>/hearthstone-overlay/config.example.json \
-      /mnt/c/Users/drewt/hearthstone-overlay/
-   cp <repo>/hearthstone-overlay/renderer/*.* /mnt/c/Users/drewt/hearthstone-overlay/renderer/
+      /mnt/c/Users/$WINUSER/hearthstone-overlay/
+   cp <repo>/hearthstone-overlay/renderer/*.* /mnt/c/Users/$WINUSER/hearthstone-overlay/renderer/
    ```
 
-   Do NOT overwrite `C:\Users\drewt\hearthstone-overlay\config.json` — it holds
+   Do NOT overwrite `C:\Users\%WINUSER%\hearthstone-overlay\config.json` — it holds
    the user's saved panel positions. Only seed it from `config.example.json`
    if it does not exist.
 
@@ -52,9 +52,9 @@ follow the exact commands, the quoting workarounds matter.
    ```bash
    cd /mnt/c && cmd.exe /c "taskkill /im electron.exe /f" >/dev/null 2>&1
    sleep 1
-   nohup cmd.exe /c "C:\Users\drewt\hearthstone-overlay\node_modules\electron\dist\electron.exe C:\Users\drewt\hearthstone-overlay > C:\Users\drewt\hearthstone-overlay\electron.log 2>&1" >/dev/null 2>&1 &
+   nohup cmd.exe /c "C:\Users\%WINUSER%\hearthstone-overlay\node_modules\electron\dist\electron.exe C:\Users\%WINUSER%\hearthstone-overlay > C:\Users\%WINUSER%\hearthstone-overlay\electron.log 2>&1" >/dev/null 2>&1 &
    sleep 4
-   cat /mnt/c/Users/drewt/hearthstone-overlay/electron.log  # empty = all hotkeys registered
+   cat /mnt/c/Users/$WINUSER/hearthstone-overlay/electron.log  # empty = all hotkeys registered
    cmd.exe /c "tasklist" 2>/dev/null | grep -ci electron    # ~7 processes = 4 panels up
    ```
 
@@ -62,7 +62,7 @@ follow the exact commands, the quoting workarounds matter.
    - `cmd.exe` from WSL mangles quoted paths — use the 8.3 short path
      `C:\PROGRA~1\nodejs\...` instead of quoting `Program Files`.
    - Electron's postinstall needs `node` on PATH:
-     `cmd.exe /c "set PATH=C:\PROGRA~1\nodejs;%PATH%&& cd /d C:\Users\drewt\hearthstone-overlay && npm.cmd install"`,
+     `cmd.exe /c "set PATH=C:\PROGRA~1\nodejs;%PATH%&& cd /d C:\Users\%WINUSER%\hearthstone-overlay && npm.cmd install"`,
      and if npm's allow-scripts blocks it, run
      `cd node_modules\electron && node install.js` the same way.
    - If Node.js is missing entirely:

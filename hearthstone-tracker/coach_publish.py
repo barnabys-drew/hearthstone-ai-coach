@@ -12,8 +12,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
+
+# Re-exec into the project venv (like ./hst) so dependencies such as pydantic
+# resolve no matter which python invoked this script. Compare sys.prefix, not
+# executable paths — venv pythons are symlinks to the base interpreter.
+_VENV_DIR = Path(__file__).resolve().parent / ".venv"
+_VENV_PYTHON = _VENV_DIR / "bin" / "python"
+if _VENV_PYTHON.exists() and Path(sys.prefix).resolve() != _VENV_DIR.resolve():
+    os.execv(str(_VENV_PYTHON), [str(_VENV_PYTHON), __file__, *sys.argv[1:]])
 
 # Works when launched directly from this directory without package install.
 sys.path.insert(0, str(Path(__file__).resolve().parent))

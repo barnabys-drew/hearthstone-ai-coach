@@ -47,11 +47,15 @@ same mistake doesn't repeat game after game.
    session through a corrupt shared log), starts exactly ONE feed appending to
    a FRESH per-run log file (no truncation races with tail -F), verifies it
    survived startup, and prints `FEED_PID=` and `LOG=<path>` on success.
-2. Watch that LOG with a persistent Monitor running the repo's filter plus a
-   liveness watchdog (silence must never masquerade as a quiet game):
+2. Watch the feed with a persistent Monitor running the repo's watcher (it
+   follows the stable symlink `/tmp/hst_coach_current.log` BY NAME, so it
+   survives feed restarts, and it includes the liveness watchdog — silence
+   must never masquerade as a quiet game):
    ```bash
-   { tail -n0 -F <LOG> & while sleep 30; do pgrep -f "hstracker live" >/dev/null || { echo "!! FEED PROCESS DIED — coaching is blind until coach_feed.sh is rerun"; break; }; done; } | awk -f <repo>/hearthstone-tracker/coach_filter.awk
+   <repo>/hearthstone-tracker/coach_watch.sh
    ```
+   Re-arm the Monitor IMMEDIATELY whenever it times out — a lapsed monitor
+   while a game runs means missed turns (this happened in a real session).
    `coach_filter.awk` passes ONLY decision points: MULLIGAN / your-turn TURN
    blocks (with their indented detail lines) / EXTRA TURN / DISCOVER PENDING /
    GAME OVER / `!!` + errors / and `== UPDATE` lines that ADD cards to YOUR
@@ -145,7 +149,7 @@ At the start of a new coaching session, clear the overlay once:
 ```
 
 The overlay reads `advice.json`/`lessons.json` beside the mirrored `live.json`
-(default WSL folder `/mnt/c/Users/drewt/hs-overlay`, override with
+(default WSL folder `/mnt/c/Users/$WINUSER/hs-overlay`, override with
 `HS_OVERLAY_DIR` or `--overlay-dir`).
 
 ## Response deadline: 15 seconds

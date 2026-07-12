@@ -11,9 +11,11 @@ The tracker and AI coach still run in WSL. This Electron window runs on Windows 
 
 1. Install Node.js on Windows.
 2. Run Hearthstone in **Windowed (Fullscreen)** / borderless mode. Native overlays cannot reliably float over exclusive fullscreen.
-3. Use the default shared folder, or choose your own:
-   - WSL path: `/mnt/c/Users/drewt/hs-overlay`
-   - Windows path: `C:\Users\drewt\hs-overlay`
+3. Use the default shared folder, or choose your own. The default is
+   auto-detected: `hs-overlay` under your Windows user profile
+   (`C:\Users\<you>\hs-overlay`, WSL: `/mnt/c/Users/<you>/hs-overlay`).
+   Override with `overlayDir` in `config.json` (Windows side) and
+   `HS_OVERLAY_DIR` / `HS_WINDOWS_USER` (WSL side).
 
 ## Run (browser mode — easiest, nothing to install on Windows)
 
@@ -48,14 +50,14 @@ If you want a different shared folder, edit `config.json`:
 
 ```json
 {
-  "overlayDir": "C:/Users/drewt/hs-overlay"
+  "overlayDir": "C:/Users/<you>/hs-overlay"
 }
 ```
 
 From WSL, start the tracker feed as usual. `hst live` now mirrors `live.json` to the overlay folder automatically:
 
 ```bash
-cd /home/drewpweiner/code/hearthstone-deck-recommender/hearthstone-tracker
+cd <repo>/hearthstone-tracker
 ./coach_feed.sh
 ```
 

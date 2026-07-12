@@ -3,6 +3,9 @@
 The live tracker runs in WSL, but the native always-on-top overlay runs on the
 Windows side.  This module writes tiny JSON files to a shared directory that a
 Windows Electron process can poll without needing a server.
+
+The advice payload is validated through pydantic models so every writer
+(CLI flags, raw JSON, the coach agent) produces the same normalized shape.
 """
 from __future__ import annotations
 
@@ -11,6 +14,8 @@ import os
 import time
 from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .config import DEFAULT_DB
 
@@ -24,67 +29,176 @@ _SYSTEM_WINDOWS_USERS = {
     "wsiaccount",
 }
 _VALID_KINDS = {"idle", "turn", "mulligan", "lethal", "update", "gameover"}
+_GAME_OVER_STATES = {"WON", "LOST", "TIED", "UNKNOWN"}
 
 
-def _coerce_text(value: Any, *, max_len: int = 600) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    if not text:
-        return None
+def _truncate(text: str, max_len: int) -> str:
+    text = text.strip()
     if len(text) > max_len:
         return text[: max_len - 1].rstrip() + "…"
     return text
 
 
-def _coerce_steps(value: Any) -> list[str]:
-    if value is None:
-        return []
-    if isinstance(value, str):
-        raw = [line.strip() for line in value.splitlines()]
-    elif isinstance(value, (list, tuple)):
-        raw = [str(item).strip() for item in value]
-    else:
-        raw = [str(value).strip()]
-    return [text[:240] + ("…" if len(text) > 240 else "") for text in raw if text][:12]
+class MulliganRow(BaseModel):
+    """One keep/toss row on the mulligan card."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    card: str = Field(validation_alias="name", max_length=200)
+    keep: bool = False
+    reason: str | None = None
+
+    @field_validator("card", mode="after")
+    @classmethod
+    def _clip_card(cls, value: str) -> str:
+        return _truncate(value, 80)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def _clip_reason(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return _truncate(text, 180) if text else None
 
 
-def _coerce_mulligan(value: Any) -> list[dict[str, Any]]:
-    if not value:
-        return []
-    result: list[dict[str, Any]] = []
-    if not isinstance(value, list):
-        value = [value]
-    for item in value[:10]:
-        if isinstance(item, dict):
-            card = _coerce_text(item.get("card") or item.get("name"), max_len=80)
-            if not card:
-                continue
-            result.append({
-                "card": card,
-                "keep": bool(item.get("keep")),
-                "reason": _coerce_text(item.get("reason"), max_len=180),
-            })
+class Lethal(BaseModel):
+    """Lethal flag + the arithmetic shown on the red banner."""
+
+    is_lethal: bool = False
+    math: str | None = None
+
+    @field_validator("math", mode="before")
+    @classmethod
+    def _clip_math(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return _truncate(text, 160) if text else None
+
+
+class Advice(BaseModel):
+    """The full advice card, as rendered by the overlay panels."""
+
+    ts: float = Field(default_factory=time.time)
+    kind: str = "turn"
+    turn: int | None = None
+    headline: str | None = None
+    why: str | None = None
+    steps: list[str] = Field(default_factory=list)
+    warning: str | None = None
+    lethal: Lethal | None = None
+    mulligan: list[MulliganRow] = Field(default_factory=list)
+    game_over: str | None = None
+    discover: str | None = None
+    lessons: list[str] = Field(default_factory=list)
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _valid_kind(cls, value: Any) -> str:
+        kind = str(value or "turn").lower()
+        return kind if kind in _VALID_KINDS else "turn"
+
+    @field_validator("turn", mode="before")
+    @classmethod
+    def _coerce_turn(cls, value: Any) -> int | None:
+        if value is None or not str(value).strip():
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @field_validator("headline", "why", "warning", "game_over", "discover", mode="before")
+    @classmethod
+    def _clip_text(cls, value: Any, info) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        limits = {"headline": 120, "why": 900, "warning": 240, "game_over": 20, "discover": 240}
+        return _truncate(text, limits[info.field_name])
+
+    @field_validator("steps", "lessons", mode="before")
+    @classmethod
+    def _coerce_lines(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            raw = value.splitlines()
+        elif isinstance(value, (list, tuple)):
+            raw = [str(item) for item in value]
         else:
-            text = _coerce_text(item, max_len=180)
-            if text:
-                result.append({"card": text, "keep": False, "reason": None})
-    return result
+            raw = [str(value)]
+        lines = [_truncate(text, 240) for text in (t.strip() for t in raw) if text]
+        return lines[:12]
+
+    @field_validator("lethal", mode="before")
+    @classmethod
+    def _coerce_lethal(cls, value: Any) -> Any:
+        if value is None or isinstance(value, (dict, Lethal)):
+            return value
+        if isinstance(value, bool):
+            return {"is_lethal": value}
+        return {"is_lethal": True, "math": str(value)}
+
+    @field_validator("mulligan", mode="before")
+    @classmethod
+    def _coerce_mulligan(cls, value: Any) -> list[Any]:
+        if not value:
+            return []
+        if not isinstance(value, list):
+            value = [value]
+        rows = []
+        for item in value[:10]:
+            if isinstance(item, (dict, MulliganRow)):
+                rows.append(item)
+            else:
+                text = str(item).strip()
+                if text:
+                    rows.append({"card": text})
+        return rows
+
+    @model_validator(mode="after")
+    def _kind_consistency(self) -> "Advice":
+        if self.lethal and self.lethal.is_lethal is False and self.kind == "lethal":
+            self.lethal.is_lethal = True
+        if self.kind == "lethal" and self.lethal is None:
+            self.lethal = Lethal(is_lethal=True)
+        if self.game_over and self.game_over.upper() in _GAME_OVER_STATES:
+            self.game_over = self.game_over.upper()
+        if self.kind == "gameover" and not self.game_over:
+            self.game_over = "UNKNOWN"
+        if not self.headline:
+            self.headline = _DEFAULT_HEADLINES.get(self.kind, "Do this now")
+        self.lessons = self.lessons[:4]
+        return self
 
 
-def _coerce_lethal(value: Any, *, kind: str) -> dict[str, Any] | None:
-    if value is None:
-        if kind == "lethal":
-            return {"is_lethal": True, "math": None}
-        return None
-    if isinstance(value, dict):
-        return {
-            "is_lethal": bool(value.get("is_lethal") or value.get("lethal") or kind == "lethal"),
-            "math": _coerce_text(value.get("math"), max_len=160),
-        }
-    if isinstance(value, bool):
-        return {"is_lethal": value or kind == "lethal", "math": None}
-    return {"is_lethal": True, "math": _coerce_text(value, max_len=160)}
+_DEFAULT_HEADLINES = {
+    "idle": "Waiting for live coach",
+    "turn": "Do this now",
+    "mulligan": "Mulligan advice",
+    "lethal": "LETHAL",
+    "update": "Update",
+    "gameover": "Game over",
+}
+
+
+class LessonsFile(BaseModel):
+    """Coaching lessons accumulated across games (lessons.json)."""
+
+    ts: float = Field(default_factory=time.time)
+    lessons: list[str] = Field(default_factory=list)
+
+    @field_validator("lessons", mode="before")
+    @classmethod
+    def _coerce_lessons(cls, value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        lines = [_truncate(str(item), 240) for item in value if str(item).strip()]
+        return lines
 
 
 def default_overlay_dir() -> Path:
@@ -100,8 +214,11 @@ def default_overlay_dir() -> Path:
         ]
         if len(candidates) == 1:
             return candidates[0] / "hs-overlay"
+        # Several Windows users: prefer one whose name resembles the WSL user.
+        wsl_user = os.environ.get("USER", "").lower()
         for path in candidates:
-            if path.name.lower() in {"drewt", "drewpweiner"}:
+            name = path.name.lower()
+            if wsl_user and (name == wsl_user or name in wsl_user or wsl_user in name):
                 return path / "hs-overlay"
     return DEFAULT_DB.parent / "overlay"
 
@@ -120,44 +237,8 @@ def atomic_write_json(path: Path, payload: dict[str, Any]) -> Path:
 
 
 def normalize_advice(payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    payload = dict(payload or {})
-    kind = str(payload.get("kind") or "turn").lower()
-    if kind not in _VALID_KINDS:
-        kind = "turn"
-    turn = payload.get("turn")
-    try:
-        turn = int(turn) if turn is not None and str(turn).strip() else None
-    except (TypeError, ValueError):
-        turn = None
-
-    advice = {
-        "ts": float(payload.get("ts") or time.time()),
-        "kind": kind,
-        "turn": turn,
-        "headline": _coerce_text(payload.get("headline"), max_len=120) or _default_headline(kind),
-        "why": _coerce_text(payload.get("why"), max_len=900),
-        "steps": _coerce_steps(payload.get("steps")),
-        "warning": _coerce_text(payload.get("warning"), max_len=240),
-        "lethal": _coerce_lethal(payload.get("lethal"), kind=kind),
-        "mulligan": _coerce_mulligan(payload.get("mulligan")),
-        "game_over": _coerce_text(payload.get("game_over"), max_len=20),
-        "discover": _coerce_text(payload.get("discover"), max_len=240),
-        "lessons": _coerce_steps(payload.get("lessons"))[:4],
-    }
-    if kind == "gameover" and not advice["game_over"]:
-        advice["game_over"] = "UNKNOWN"
-    return advice
-
-
-def _default_headline(kind: str) -> str:
-    return {
-        "idle": "Waiting for live coach",
-        "turn": "Do this now",
-        "mulligan": "Mulligan advice",
-        "lethal": "LETHAL",
-        "update": "Update",
-        "gameover": "Game over",
-    }.get(kind, "Do this now")
+    """Validate/normalize an advice payload into the overlay's JSON shape."""
+    return Advice.model_validate(payload or {}).model_dump(mode="json")
 
 
 def clear_advice(turn: int | None = None) -> dict[str, Any]:
@@ -166,7 +247,6 @@ def clear_advice(turn: int | None = None) -> dict[str, Any]:
         "turn": turn,
         "headline": "Waiting for live coach",
         "why": "Start a Hearthstone game and publish turn advice to populate this panel.",
-        "steps": [],
     })
 
 
@@ -185,17 +265,17 @@ def write_clear_advice(overlay_dir: str | os.PathLike[str] | None = None, *, tur
 
 def append_lessons(lessons: list[str], overlay_dir: str | os.PathLike[str] | None = None) -> Path | None:
     """Accumulate lessons in lessons.json across games (newest first, deduped)."""
-    lessons = [text for text in (_coerce_text(l, max_len=240) for l in lessons) if text]
-    if not lessons:
+    incoming = LessonsFile(lessons=lessons).lessons
+    if not incoming:
         return None
     directory = resolve_overlay_dir(overlay_dir)
     path = directory / "lessons.json"
     try:
-        existing = json.loads(path.read_text(encoding="utf-8")).get("lessons", [])
-    except (OSError, json.JSONDecodeError):
+        existing = LessonsFile.model_validate(json.loads(path.read_text(encoding="utf-8"))).lessons
+    except (OSError, json.JSONDecodeError, ValueError):
         existing = []
-    merged = list(dict.fromkeys(lessons + [l for l in existing if isinstance(l, str)]))[:30]
-    return atomic_write_json(path, {"ts": time.time(), "lessons": merged})
+    merged = list(dict.fromkeys(incoming + existing))[:30]
+    return atomic_write_json(path, LessonsFile(lessons=merged).model_dump(mode="json"))
 
 
 def write_discover(text: str, overlay_dir: str | os.PathLike[str] | None = None) -> Path:

@@ -2,34 +2,48 @@
 # Start (or cleanly restart) the SINGLE live-coach feed process.
 #
 # Guarantees, in order:
-#   1. No other `hstracker live` process survives (kills zombies from any
-#      previous session — detached children outlive their shell wrappers).
+#   1. No other `hstracker live` process (owned by this user) survives — kills
+#      zombies from any previous session; detached children outlive their
+#      shell wrappers.
 #   2. The feed writes to a FRESH per-run log file in append mode, so no
-#      truncation races with a tail -F reader are possible.
+#      truncation races with a tail -F reader are possible. Logs live under a
+#      per-user runtime dir (never world-writable /tmp — no symlink planting).
 #   3. The feed is verified alive after startup; a dead-on-arrival feed
 #      fails loudly with its output instead of silently doing nothing.
 #
 # Usage: ./coach_feed.sh [log-file]
-# Prints FEED_PID=<pid> and LOG=<path> on success. Exit 1 on any failure.
+# Prints FEED_PID=<pid>, LOG=<path> and CURRENT=<symlink> on success.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# 1. Kill every existing feed and verify zero remain (zombie hygiene).
-pkill -f "hstracker live" 2>/dev/null || true
+RUN_DIR="${XDG_RUNTIME_DIR:-$HOME/.cache}/hstracker"
+mkdir -p "$RUN_DIR"
+
+# 1. Kill every existing feed owned by this user and verify zero remain.
+FEED_PATTERN="hstracker live"
+pkill -u "$USER" -f "$FEED_PATTERN" 2>/dev/null || true
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-    pgrep -f "hstracker live" >/dev/null || break
+    pgrep -u "$USER" -f "$FEED_PATTERN" >/dev/null || break
     sleep 0.3
-    pkill -9 -f "hstracker live" 2>/dev/null || true
+    pkill -9 -u "$USER" -f "$FEED_PATTERN" 2>/dev/null || true
 done
-if pgrep -f "hstracker live" >/dev/null; then
+if pgrep -u "$USER" -f "$FEED_PATTERN" >/dev/null; then
     echo "ERROR: could not kill existing hstracker live process(es):" >&2
-    pgrep -fa "hstracker live" >&2
+    pgrep -u "$USER" -fa "$FEED_PATTERN" >&2
     exit 1
 fi
 
-# 2. Fresh log file, append-only writer.
-LOG="${1:-/tmp/hst_coach_$(date +%Y%m%d_%H%M%S).log}"
+# 2. Fresh log file, append-only writer. A stable symlink always points at
+#    the CURRENT run's log so watchers (tail --follow=name) survive feed
+#    restarts without being re-pointed at a new path.
+LOG="${1:-$RUN_DIR/coach_$(date +%Y%m%d_%H%M%S).log}"
+CURRENT_LINK="$RUN_DIR/coach_current.log"
+if [ -e "$LOG" ] && [ ! -O "$LOG" ]; then
+    echo "ERROR: refusing to write to $LOG — exists and is not owned by $USER" >&2
+    exit 1
+fi
 : > "$LOG"
+ln -sfn "$LOG" "$CURRENT_LINK"
 PYTHONUNBUFFERED=1 nohup ./hst live >> "$LOG" 2>&1 &
 FEED_PID=$!
 
@@ -46,3 +60,4 @@ fi
 
 echo "FEED_PID=$FEED_PID"
 echo "LOG=$LOG"
+echo "CURRENT=$CURRENT_LINK"
