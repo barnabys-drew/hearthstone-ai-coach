@@ -63,8 +63,10 @@ def snapshot_delta(prev: dict, curr: dict) -> str | None:
 
     Returns None if nothing meaningful changed (same hand/board names on both
     sides). Otherwise returns e.g. "== UPDATE (turn 5) — my hand gained: X | opp
-    board gained: Y". Only compares hand/board *names* (Counter multiset), not
-    full details — assumes live.json already has the full card info.
+    board gained: Y". Comparison is by hand/board *names* (Counter multiset),
+    but GAINED cards are printed with cost/stats and rules text: mid-turn gains
+    are usually generated (discover picks, Flashback, ...), so the coach reading
+    this line has never seen them in the deck list and must not have to ask.
     """
     from collections import Counter
 
@@ -86,6 +88,33 @@ def snapshot_delta(prev: dict, curr: dict) -> str | None:
     my_hand_lost = my_hand_prev - my_hand_curr
     my_board_gained = my_board_curr - my_board_prev
     my_board_lost = my_board_prev - my_board_curr
+
+    def describe_gains(gained, cards: list) -> str:
+        """Gained cards rendered with the detail a coach needs to act on them.
+
+        Hand cards get "Name(cost)", board cards "Name atk/health", both with
+        rules text (truncated like the DISCOVER PENDING line). Cards missing
+        from `cards` (shouldn't happen) fall back to the bare name.
+        """
+        by_name: dict[str, dict] = {}
+        for c in cards:
+            by_name.setdefault(c["name"], c)
+        details = []
+        for name in sorted(gained.elements()):
+            card = by_name.get(name)
+            if card is None:
+                details.append(name)
+                continue
+            if "atk" in card:
+                detail = f"{name} {card.get('atk', 0)}/{card.get('health', 0)}"
+            else:
+                cost = card.get("cost")
+                detail = f"{name}({'?' if cost is None else cost})"
+            text = card.get("text")
+            if text:
+                detail += f" [{text[:90]}]"
+            details.append(detail)
+        return ", ".join(details)
 
     def board_stat_changes(prev_board: list, curr_board: list) -> list[str]:
         """Stat lines for minions that stayed on board but changed atk/health.
@@ -128,11 +157,11 @@ def snapshot_delta(prev: dict, curr: dict) -> str | None:
     if my_hand_gained or my_hand_lost or my_board_gained or my_board_lost:
         my_parts = []
         if my_hand_gained:
-            my_parts.append(f"hand +{', '.join(sorted(my_hand_gained.elements()))}")
+            my_parts.append(f"hand +{describe_gains(my_hand_gained, me_curr.get('hand', []))}")
         if my_hand_lost:
             my_parts.append(f"hand -{', '.join(sorted(my_hand_lost.elements()))}")
         if my_board_gained:
-            my_parts.append(f"board +{', '.join(sorted(my_board_gained.elements()))}")
+            my_parts.append(f"board +{describe_gains(my_board_gained, me_curr.get('board', []))}")
         if my_board_lost:
             my_parts.append(f"board -{', '.join(sorted(my_board_lost.elements()))}")
         if my_parts:
@@ -181,7 +210,7 @@ def snapshot_delta(prev: dict, curr: dict) -> str | None:
             delta = opp_hand_count_curr - opp_hand_count_prev
             opp_parts.append(f"hand {'+' if delta > 0 else ''}{delta}")
         if opp_board_gained:
-            opp_parts.append(f"board +{', '.join(sorted(opp_board_gained.elements()))}")
+            opp_parts.append(f"board +{describe_gains(opp_board_gained, opp_curr.get('board', []))}")
         if opp_board_lost:
             opp_parts.append(f"board -{', '.join(sorted(opp_board_lost.elements()))}")
         if opp_parts:
@@ -650,7 +679,10 @@ def format_snapshot(snap: dict[str, Any]) -> str:
                 cost = f" [cost last time: {item['cost']}]" if item.get("cost") else ""
                 # The #id lets the coach ack usage: coach_publish --applied-lesson #<id>
                 ref = f"  #{item['id']}" if item.get("id") else ""
-                lines.append(f"     {item['lesson']}{cost}{ref}")
+                # T1 = lexical fallback hit, not an exact trigger — the coach
+                # should weigh it below exact matches.
+                fuzzy = "[T1 fuzzy] " if item.get("tier") == "t1" else ""
+                lines.append(f"     {fuzzy}{item['lesson']}{cost}{ref}")
     deck_left = me.get("deck_cards_left")
     if deck_left:
         counts = ", ".join(

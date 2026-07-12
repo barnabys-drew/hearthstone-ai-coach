@@ -28,6 +28,9 @@ Misplays are stored in TWO places, and both matter:
    mistakes that apply to the exact board in front of you — apply them or
    explicitly say why not. Record new ones with
    `coach_publish.py --lesson-record` (see the overlay publishing section).
+   A line prefixed `[T1 fuzzy]` is a text-similarity match, not an exact
+   trigger hit — treat it as a suggestion to weigh, below exact matches;
+   ignore it freely if it doesn't fit the board.
 2. **`lessons.md`** (prose, human-readable) — the narrative log below.
 
 ## Lessons file: remember misplays across games
@@ -116,11 +119,21 @@ same mistake doesn't repeat game after game.
    override) adds card rules text and flags; read it only when you need those.
    When you do read it, always re-read fresh — it is rewritten continuously.
 
-## Optional native overlay publishing
+## Overlay publishing (REQUIRED when the overlay is running)
 
-If the Hearthstone Coach Overlay is running, publish the same advice you send
-to chat as structured JSON immediately after composing it. This is optional and
-non-blocking: if the publish command fails, still send the chat advice on time.
+If the Hearthstone Coach Overlay is running, publishing is NOT optional: every
+decision point you answer in chat (mulligan, your-turn plan, lethal, game over)
+gets the same advice published as structured JSON in the SAME tool batch as
+the chat message. The overlay is what the user actually looks at in-game — chat
+advice that never reaches `advice.json` is advice the user never sees. Only the
+*ordering* is flexible: chat first, publish immediately after (or batched
+together); a failed publish must never delay the chat advice.
+
+**The mulligan publish is the one most often skipped and the one with the
+shortest window** (real recurring failure: multiple sessions gave chat-only
+mulligan advice and the overlay sat on a stale card all game). On the
+`== MULLIGAN` marker, the `kind=mulligan` publish goes out with your keep/toss
+answer — before turn 1 advice, no exceptions.
 
 Use `../hearthstone-tracker/coach_publish.py` (or the absolute repo path) and
 keep the payload short enough to scan while playing:
@@ -266,6 +279,11 @@ Work through this checklist before writing anything:
     target, leaving no legal target for step 2. Sequence deterministic,
     targeted removal FIRST; put random-splash cards last in the numbered list,
     and say plainly that its target is not guaranteed.
+11. **Publish to the overlay in the same tool batch as the chat advice** (when
+    the overlay is running — payload shapes in the overlay publishing section).
+    Mulligan marker: `kind=mulligan` with the keep/toss rows. Turn: `kind=turn`
+    with headline/why/steps. This step is part of answering, not an optional
+    extra; skipping it leaves a stale card on the overlay all game.
 
 ## Output format (strict — the user is on the game's turn timer)
 
@@ -279,7 +297,8 @@ Work through this checklist before writing anything:
   shortfall instead.
 - Mulligan (`== MULLIGAN` marker): **bullet list** of keep/toss recommendations,
   one card per line with a few words of reasoning. User scans it in seconds
-  before locking in.
+  before locking in. In the SAME batch, publish it:
+  `coach_publish.py --json '{"kind":"mulligan","turn":1,"mulligan":[{"card":"...","keep":true,"reason":"..."}]}'`
 - Game over: a short honest post-mortem is welcome — what decided the game,
   what to do differently. This is the only time longer analysis is appropriate.
 
