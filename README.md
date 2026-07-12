@@ -35,6 +35,7 @@ The skills:
 - **`hearthstone-deck-builder`** — build or verify a Hearthstone deck and produce a clipboard-ready import deck code.
 - **`hearthstone-deck-recommender`** — compare your collection against current Standard meta decks and rank which decks are cheapest/easiest to complete.
 - **`hearthstone-live-coach`** — coach you turn by turn during a real game: the agent tails the game's own logs via the tracker's `hst live` feed and answers "what's my play?" with the actual hand, boards, and lethal math in front of it.
+- **`hearthstone-overlay`** — start the native in-game overlay: four always-on-top panels (turn advice, HDT-style deck tracker, opponent tracker, accumulated coaching lessons) that render the live coach's advice next to the game.
 
 Also in this repo:
 
@@ -52,6 +53,15 @@ Also in this repo:
   these snapshots and advises turn-by-turn, drawing from the actual game state
   (not model memory). Includes a rigorous checklist and traps from real-game
   validation. See its [architecture & checklist](hearthstone-live-coach/README.md).
+
+- **[`hearthstone-overlay`](hearthstone-overlay/README.md)** — a native
+  always-on-top overlay for the live coach: four standalone panels (turn
+  advice, an HDT-style deck tracker with card-art tiles and draw odds, an
+  opponent played-cards tracker, and coaching lessons accumulated across
+  games). Runs as a Windows Electron app with click-through + hotkeys, or as
+  a zero-install web page served from WSL (`serve.py`). The tracker's
+  `hst live` mirrors game state to it automatically and the coach publishes
+  plans via `coach_publish.py`.
 
 - **[`hearthstone-post-game-coach`](hearthstone-post-game-coach/SKILL.md)** — analyze
   completed games to identify the deciding turn, suggest deck tweaks, and teach one
@@ -270,9 +280,15 @@ hearthstone-deck-recommender/
 hearthstone-live-coach/
   SKILL.md     # live turn-by-turn coaching playbook over the tracker's hst live feed
 
+hearthstone-overlay/
+  main.js      # Electron: 4 always-on-top panels (advice/deck/opponent/lessons)
+  renderer/    # shared panel UI (also served as a web page)
+  serve.py     # zero-install browser mode: serves panels + JSON from WSL
+
 hearthstone-tracker/
   hst          # CLI launcher (backfill | watch | live | stats)
-  hstracker/   # Power.log -> SQLite capture, live snapshots, stats queries
+  hstracker/   # Power.log -> SQLite capture, live snapshots, stats, overlay bridge
+  coach_publish.py  # publish coach advice/discover picks/lessons to the overlay
   requirements.txt
 
 examples/     # stable synthetic fixtures
