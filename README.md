@@ -300,7 +300,8 @@ hearthstone-tracker/
 
 examples/     # stable synthetic fixtures
 tests/        # standard-library unittest suite (tracker tests need hslog)
-docs/         # collection/meta guides and public-release checklist
+docs/         # collection/meta guides, model-agnostic coach setup,
+              # progressive-rag.md: the lessons engine as a RAG learning lab
 ```
 
 ---
