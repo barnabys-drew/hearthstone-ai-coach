@@ -135,7 +135,7 @@ def _advice_id(payload: dict) -> str:
     import hashlib
     import time
     basis = json.dumps(payload, sort_keys=True, default=str) + str(time.time())
-    return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:12]
 
 
 def _log_advice_event(payload: dict, args: argparse.Namespace) -> None:

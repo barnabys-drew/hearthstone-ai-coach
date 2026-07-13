@@ -47,9 +47,14 @@ INGEST_JOIN_WINDOW = 30 * 60    # post-game coach records lessons after the outc
 
 
 def lesson_id(text: str) -> str:
-    """Stable 12-hex id for a lesson: survives whitespace and casing edits."""
+    """Stable 12-hex id for a lesson: survives whitespace and casing edits.
+
+    Content-address, not a security control — sha1 is kept deliberately so
+    ids stay joinable against retrieval_log.jsonl history already on disk;
+    switching hash algorithms would silently orphan every past event.
+    """
     norm = " ".join(text.split()).lower()
-    return hashlib.sha1(norm.encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha1(norm.encode("utf-8")).hexdigest()[:12]  # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
 
 
 def match_entry(result: dict[str, Any]) -> dict[str, Any]:
