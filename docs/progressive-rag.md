@@ -233,32 +233,124 @@ value of context.
 SOC transfer: a per-alert token budget is the primary cost lever for an LLM
 triage agent at volume; ranking evidence under that budget is the craft.
 
-## Phase 6 — Coach feedback & reasoning improvement (deferred)
+## Phase 6 — Coach feedback & reasoning improvement (planned as sub-phases 2026-07-12)
 
-**Entry gate:** Phase-1+ telemetry shows what retrieval earned. Now measure
-whether the *advice given using that retrieval* was sound — did the user follow
-it, did it win, was it clear?
+**Entry gate (whole phase):** Phase-1+ telemetry shows what retrieval earned.
+Now measure whether the *advice given using that retrieval* was sound — did
+the user follow it, did it win, was it clear?
 
 *Orthogonal to Phases 1–5*: retrieval improves *context*; this phase improves
 *generation given context*. Build only after retrieval is instrumented.
 
-Build (when gated in):
-- Post-game feedback: user rates whether they followed each advice, and if
-  following it correlated with the outcome (win/loss).
-- Advice telemetry: tag each turn's chat advice with an id; join against
-  post-game ratings to build a (context, advice, followed?, won?) dataset.
-- Quality metrics per-coach-session: % of advice followed, % of followed
-  advice that correlated with winning, contradiction rate (same board state,
-  different advice across turns).
-- A/B test generation: prompt variations, reasoning-check branches, style
-  tuning — only after measurement shows which lever matters.
+The original single-phase sketch conflated four different problems — logging
+generation, detecting adherence, measuring quality, and improving generation
+— each with its own gate. Split accordingly; 6a→6e is a dependency chain,
+and each sub-phase repeats the lab's core move: instrument before escalating.
 
-Teaches: generation telemetry, feedback loops, distinguishing retrieval
-quality from reasoning quality, A/B testing LLM output.
+### 6a — Advice telemetry (instrument generation) — gate: none, telemetry always comes first
 
-SOC transfer: a triage agent's dispositions are measured by analyst adoption
-(did they use it?) and outcomes (was it right?). Coach quality is analogous:
-measure adoption and win correlation before investing in prompt tuning.
+The generation-side mirror of Phase 1. Everything downstream needs it and it
+costs no model calls:
+
+- Every `coach_publish.py` publish (mulligan/turn/lethal/discover/gameover)
+  gets a stable `advice_id` and appends an `advice` event to the retrieval
+  log: kind, turn, headline, step count, the card names the steps reference,
+  lessons cited (`--applied-lesson` acks already exist — this generalizes
+  them to the whole advice record), and **the model that authored it**
+  (`--model` flag the coaching skills must pass; the overlay footer shows it
+  — this is where the "make the model in use visible" standing constraint
+  gets implemented, and it makes cost-per-model attributable after the
+  Fable credit-drain incident).
+- Join key: (session, game_no, turn) — the same weak key Phase 1 uses, so
+  advice events land in the same per-game aggregates.
+- Deterministic, hot-path-free, dry-run-testable; `rag-report` grows an
+  "Advice" section (advice events per game, kinds, models seen).
+
+Teaches: generation-side event design, attribution (which model said what).
+SOC transfer: logging every agent disposition with model/version/prompt-id —
+the audit trail that makes any later quality claim checkable.
+
+### 6b — Adherence detection (did the user follow it?) — gate: ≥N games with 6a advice events
+
+The hard problem, done cheaply first. The Power.log already records what the
+user actually played; 6a records what the coach told them to play.
+
+- Deterministic adherence proxy: card names extracted from the advice steps
+  vs cards actually played/attacked that turn (both sides visible in the
+  turn's log slice). Score = overlap fraction; stored on the advice event as
+  `adherence: {score, proxy: true}`. Runs offline (replay-style), never on
+  the turn timer.
+- Optional human label: a one-line post-game confirm ("followed the turn-8
+  plan? y/n") recorded via `coach_publish.py --advice-feedback` — sparse,
+  high-quality labels that calibrate the proxy (report proxy-vs-human
+  agreement before trusting the proxy anywhere).
+- Known limits stated up front: targets are hard to verify from names alone
+  (advice "Whip into Vereesa" vs log "Whip attacked face" both mention
+  Whip); the proxy measures *card-set* adherence, not *line* adherence.
+  That's fine — label it as such and let 6c report both bounds.
+
+Teaches: proxy metrics, calibrating cheap labels against sparse gold ones.
+SOC transfer: "did the analyst follow the agent's recommendation" measured
+from case-management logs, calibrated against occasional explicit feedback.
+
+### 6c — Quality metrics + outcome joining — gate: adherence labels for ≥20 games
+
+The (context, advice, followed?, won?) dataset and the report over it —
+`hst coach-report` (or a rag-report section):
+
+- Adoption: % of advice with adherence above threshold, by kind (mulligan
+  advice is followed or not in one decision; turn plans partially).
+- Outcome correlation: win rate when advice followed vs overridden — BOTH
+  directions matter (followed-and-lost = bad advice candidates;
+  overridden-and-won = the user knew better, see 6d).
+- Consistency: contradiction rate — advice events for the same (game, turn)
+  whose step card-sets conflict (re-advice after an UPDATE that flips the
+  plan without saying why).
+- Latency: advice-event ts minus turn-marker ts, distribution vs the 15s
+  deadline the skill promises.
+- All computed offline from the log; deterministic; replayable.
+
+Teaches: adoption/outcome metrics, the difference between correlation and
+advice quality (a coach followed into losses may be coaching hard games).
+SOC transfer: disposition adoption rate, override-rate, and outcome joins —
+the exact scorecard a production triage agent gets judged on.
+
+### 6d — Failure taxonomy + KB feedback loop — gate: 6c shows a measurable bad-advice bucket
+
+Close the loop into the knowledge base the earlier phases built:
+
+- Classify the failure buckets from 6c: followed-and-lost (bad advice),
+  overridden-and-won (user beat the coach), contradiction turns, deadline
+  misses. Post-game coach reviews the worst bucket per session.
+- Feed back: overridden-and-won turns are lesson candidates AUTHORED BY THE
+  USER'S PLAY — nominate them to `--lesson-record` with the trigger built
+  from that turn's board (the KB grows from generation failures, closing
+  the loop into Phases 0–4: new lessons → trigger matching → hygiene stats).
+- Nomination is deterministic; writing the lesson prose stays the post-game
+  coach's LLM job at the boundary, same split as Phase 4's headlines.
+
+Teaches: failure taxonomies, turning evaluation into training data.
+SOC transfer: analyst overrides that proved correct become new dispositions
+— the KB learns from the agent being wrong, with provenance.
+
+### 6e — Generation A/B (prompt & reasoning experiments) — gate: 6c baselines stable AND 6d names a lever
+
+Only now, with a scorecard to read, is changing the generator justified:
+
+- A/B the coaching procedure: prompt variants, reasoning-check branches
+  (e.g. "re-verify lethal math before answering"), style/length tuning.
+  Assignment recorded on the 6a advice event (`variant: ...`); 6c metrics
+  split by variant are the readout.
+- Sample-size honesty: at ~10 advice events/game, detecting a 10-point
+  adoption swing needs tens of games per arm — the report must show
+  confidence, not just deltas, or this becomes vibes with extra steps.
+- If no lever moves the metrics, the answer is "the generator was fine;
+  invest elsewhere" — a valid outcome, same as every other gate.
+
+Teaches: A/B testing LLM output, statistical honesty at small n,
+distinguishing retrieval quality from reasoning quality.
+SOC transfer: prompt changes to a triage agent ship behind an experiment
+flag and win on the adoption/outcome scorecard, never on anecdotes.
 
 ## Phase 7 — Continuous verification suite (planned 2026-07-12)
 
