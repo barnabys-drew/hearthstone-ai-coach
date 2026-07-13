@@ -166,6 +166,7 @@ def check_overlay_dir() -> CheckResult:
         return _result("overlay dir", "WARN", "not resolvable (HS_OVERLAY_DIR unset?)")
     probe = Path(directory) / ".selftest_probe"
     try:
+        Path(directory).mkdir(parents=True, exist_ok=True)
         probe.write_text("ok", encoding="utf-8")
         probe.unlink()
         return _result("overlay dir", "PASS", f"writable: {directory}")
