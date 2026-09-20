@@ -9,6 +9,6 @@
     "test": "node --test"
   },
   "devDependencies": {
-    "electron": "^43.1.0"
+    "electron": "^44.4.1"
   }
 }
