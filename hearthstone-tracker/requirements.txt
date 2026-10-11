@@ -1,5 +1,5 @@
 hslog>=1.18
-pydantic>=2.13.4
+pydantic>=2.14.0
 # Optional — Tier-2 semantic retrieval (progressive-RAG Phase 3, lab-gated).
 # Needed only to CREATE embeddings (hst rag-embed, lesson recording); the
 # live read path matches against cached vectors in pure python without it.
