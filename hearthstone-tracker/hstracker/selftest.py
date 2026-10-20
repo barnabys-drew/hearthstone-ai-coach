@@ -280,8 +280,35 @@ def check_store() -> CheckResult:
                    f"{len(store)} lessons, {stamped} with Phase-4 stats")
 
 
+def check_jev() -> CheckResult:
+    """The Jev path end to end with a fake API: state, questions, parsing,
+    overlay payload, telemetry event and feed line. No network, no spend."""
+    from .jev import MODEL, JevAdvisor, JevClient, jev_enabled
+
+    hand = {"format": 2, "game_label": None, "my_class": "WARRIOR", "opp_class": "MAGE",
+            "going_first": True, "deck_name": None, "decklist": [],
+            "offered": [{"name": "Slam", "cost": 1, "type": "spell", "text": "Deal 2.", "copies": 1},
+                        {"name": "For Glory!", "cost": 5, "type": "spell", "text": "Draw.", "copies": 1}]}
+    fake = {"model": MODEL, "usage": {"input_tokens": 100},
+            "answers": {"c0": {"noul": 0.8}, "c1": {"noul": 0.2}}}
+    published, logged = [], []
+    advisor = JevAdvisor(JevClient("selftest", post=lambda body: fake), None,
+                         publish_advice=lambda payload, _d: published.append(payload),
+                         log_event=logged.append, background=False)
+    advisor.mulligan(hand)
+    lines = advisor.drain()
+    rows = published[0]["mulligan"] if published else []
+    if [r["keep"] for r in rows] != [True, False] or not logged or not lines:
+        return _result("jev (mulligan/discover)", "FAIL",
+                       f"synthetic mulligan did not round-trip: rows={rows} lines={lines}")
+    if not jev_enabled():
+        return _result("jev (mulligan/discover)", "WARN",
+                       "code path OK; off (set HS_JEV=1 + TYPESAFE_API_KEY) — the coach model handles them")
+    return _result("jev (mulligan/discover)", "PASS", f"on, {MODEL}; code path OK")
+
+
 ALL_CHECKS = [
-    check_feed, check_overlay_dir, check_store, check_store_mirror,
+    check_feed, check_overlay_dir, check_store, check_store_mirror, check_jev,
     check_p0_triggers, check_p1_telemetry, check_p2_lexical,
     check_p3_embeddings, check_p4_hygiene, check_p5_budget, check_p6_advice,
     check_kb_capture, check_renderer_logic,

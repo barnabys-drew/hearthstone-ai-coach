@@ -94,6 +94,14 @@ def _current_deck_name(session_dir) -> str | None:
     return events[-1].name if events else None
 
 
+def _current_deck_format(session_dir) -> int | None:
+    """FormatType id of the most recently queued deck, from Decks.log."""
+    from .decks import deckstring_format
+
+    events = [ev for path in deck_logs(session_dir) for ev in parse_decks_log(path)]
+    return deckstring_format(events[-1].deckstring) if events else None
+
+
 def _current_deck_counts(session_dir, resolver) -> dict[str, int] | None:
     """{card_id: copies} for the most recently queued deck, from Decks.log."""
     from .decks import decode_deckstring_counts
@@ -148,6 +156,7 @@ def cmd_live(args) -> int:
     )
     from .budget import assemble, budget_enabled
     from .embed import T2Retriever, t2_live_enabled
+    from .jev import advisor_from_env, hand_from_snapshot
     from .lessons import StoreWatcher, mirror_store
     from .lexical import retrieve_lessons, t1_live_enabled
     from .overlay import mirror_live_snapshot, resolve_overlay_dir
@@ -163,12 +172,19 @@ def cmd_live(args) -> int:
     # retriever embeds one query per game (at its first snapshot); per-turn
     # matching is pure dot products over vectors cached by `hst rag-embed`.
     t2 = T2Retriever() if t2_live_enabled() else None
+    # Mulligans and Discovers go to Jev when opted in (HS_JEV=1 +
+    # TYPESAFE_API_KEY): background calls, answers land on the overlay and as
+    # `== JEV` feed lines. Without it, the coach model handles them as before.
+    jev = advisor_from_env(overlay_dir)
+    jev_mulligan_done: set[tuple] = set()  # (session, game_no) already asked
     mirror_store()  # give the overlay lessons panel the structured store at startup
     _record_game_and_refresh_stats(None, resolver, overlay_dir)  # stats panel at startup
 
     print(f"Live game state (json: {json_file}). Ctrl-C to stop.", flush=True)
     if overlay_dir:
         print(f"Overlay mirror: {overlay_dir}", flush=True)
+    if jev:
+        print(f"Jev: mulligans + Discovers via {jev.client.model}", flush=True)
     tail: LiveGameTail | None = None
     current_dir = None
     last_marker = None  # (path, raw_turn, phase, game_over) last printed
@@ -176,10 +192,14 @@ def cmd_live(args) -> int:
     seen_discover_ids = set()  # to avoid re-printing the same pending choice
     deck_counts = None
     deck_name = None
+    deck_format = None
     deck_game_no = -1
     snap_failing = False  # warn once (not every poll) if snapshots stop exporting
 
     while True:
+        if jev:
+            for line in jev.drain():
+                print(line, flush=True)
         dirs = session_dirs(log_root)
         newest = dirs[-1] if dirs else None
         if newest and newest != current_dir:
@@ -197,6 +217,7 @@ def cmd_live(args) -> int:
                 deck_game_no = tail.game_no
                 deck_counts = _current_deck_counts(current_dir, resolver)
                 deck_name = _current_deck_name(current_dir)
+                deck_format = _current_deck_format(current_dir)
                 # Stats panel follows the deck you QUEUED with, from game start.
                 try:
                     from .db import connect
@@ -252,6 +273,15 @@ def cmd_live(args) -> int:
                         print(f"!! Overlay mirror failed: {exc}", flush=True)
                 marker = (str(tail.path), snap["raw_turn"], snap.get("phase"), snap.get("game_over"))
 
+                game_key = (current_dir.name, tail.game_no)
+                if jev and snap.get("phase") == "mulligan" and game_key not in jev_mulligan_done:
+                    hand = hand_from_snapshot(
+                        snap, resolver, deck_counts, deck_name,
+                        tail.meta.get("FormatType") or deck_format, tail.meta.get("GameType"))
+                    if hand:
+                        jev_mulligan_done.add(game_key)
+                        jev.mulligan(hand, session=current_dir.name, game_no=tail.game_no)
+
                 # Tier 2: Check for pending unresolved Discovers (best-effort)
                 if tail.last_tree and tail.last_friendly_id is not None:
                     try:
@@ -269,6 +299,9 @@ def cmd_live(args) -> int:
                                     f"== DISCOVER PENDING — {discover['source']}: {options_str}",
                                     flush=True
                                 )
+                                if jev:
+                                    jev.discover(snap, discover, session=current_dir.name,
+                                                 game_no=tail.game_no)
                     except Exception:
                         pass  # Silently skip pending_discovers errors
 

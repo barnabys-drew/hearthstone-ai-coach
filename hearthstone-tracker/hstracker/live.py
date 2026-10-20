@@ -22,7 +22,7 @@ from hearthstone.enums import CardType, GameTag, PlayState, Step, Zone
 from hslog import LogParser
 from hslog.export import FriendlyPlayerExporter
 
-from .capture import _CREATE_GAME_MARKER, TolerantExporter, _player_names
+from .capture import _CREATE_GAME_MARKER, _META_RE, TolerantExporter, _player_names
 from .cardevents import extract_card_events
 from .cards import HeroClassResolver
 from .checks import format_checks
@@ -442,6 +442,7 @@ def snapshot_from_tree(
                 if card_id:
                     hand.append({
                         "name": card.get("name", card_id),
+                        "id": card_id,
                         "cost": entity.tags.get(GameTag.COST, card.get("cost")),
                         "type": card.get("type"),
                         "text": card_text(card),
@@ -561,6 +562,9 @@ class LiveGameTail:
         self.game_no = 0  # bumps on each CREATE_GAME, so callers can refresh per-game state
         self.last_tree: Any = None  # stash the last-parsed game tree for pending_discovers()
         self.last_friendly_id: int | None = None  # friendly player id, computed once per poll
+        # DebugPrintGame metadata of the newest game (GameType, FormatType, ...):
+        # the deck's own format can differ (a Standard deck queued in Wild).
+        self.meta: dict[str, str] = {}
 
     def poll(self) -> bool:
         """Read new bytes; True if the current-game buffer changed."""
@@ -588,6 +592,11 @@ class LiveGameTail:
             if _CREATE_GAME_MARKER in line:
                 self.lines = []  # a new game starts; drop the previous one
                 self.game_no += 1
+            m = _META_RE.search(line)
+            if m:
+                if m.group(1) == "BuildNumber":
+                    self.meta = {}  # each game's block opens with BuildNumber
+                self.meta[m.group(1)] = m.group(2)
             self.lines.append(line + "\n")
             changed = True
         return changed

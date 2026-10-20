@@ -129,6 +129,12 @@ same folder with `./coach_publish.py`, which writes `advice.json` atomically.
 The [`hearthstone-live-coach`](../hearthstone-live-coach/SKILL.md) skill packages
 this workflow as a model-agnostic playbook (setup, per-turn checklist, output
 format, known traps) so coaching quality doesn't depend on which model runs it.
+With `HS_JEV=1` and `TYPESAFE_API_KEY` set, `hst live` also answers each
+mulligan and Discover itself through TypeSafe's Jev classifier. The call runs
+on a background thread, the answer goes to the overlay and the retrieval log,
+and a `== JEV MULLIGAN` / `== JEV DISCOVER` line goes to stdout. Why Jev, and
+how it compared with Haiku and Sonnet on real hands: [`docs/jev.md`](../docs/jev.md).
+If the call fails, the feed prints one `!!` line and nothing else changes.
 Markers land within a few seconds of the real event. Battle-tested the day it
 was written: its first coached game came down to exact lethal arithmetic —
 the tool called "dead by 2 if everything goes face", and everything went

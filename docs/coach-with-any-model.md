@@ -1,17 +1,22 @@
 # Running the live coach with any AI model
 
-The coaching stack is **model-agnostic by design**. Nothing in this repository
-calls an LLM API, imports a provider SDK, or expects a specific model. The
-pipeline is plain CLIs and files:
+Turn coaching is **model-agnostic by design**: no part of it imports a
+provider SDK or expects a specific model. The one model API the stack calls
+itself is TypeSafe's Jev, for mulligans and Discovers. It's opt-in
+(`HS_JEV=1`), runs inside the tracker, and is covered in [jev.md](jev.md).
+The pipeline is plain CLIs and files:
 
 ```
 Hearthstone Power.log
       │  (game's own logging — no memory reading)
       ▼
 hst live  ──►  live.json + turn markers ──►  coach_filter.awk
-      │                                             │
+      │   │                                         │
+      │   └─► Jev (HS_JEV=1, background thread)     │
+      │       mulligan + Discover answers           │
+      │       ─► overlay + "== JEV ..." feed line   │
       ▼                                             ▼
-overlay panels (Electron / browser)          YOUR AI AGENT
+overlay panels (Electron / browser)          YOUR AI AGENT (turn plans)
       ▲                                             │
       └────────── coach_publish.py  ◄───────────────┘
                   (advice.json / lessons.json)
@@ -80,3 +85,16 @@ model's numbered plan. Slower, but the contract is identical.
 Turn advice is latency-sensitive (~15 seconds before the player moves on).
 Prefer a fast model for live coaching; use a stronger/slower one for
 post-game analysis (`hearthstone-post-game-coach`), where there is no timer.
+
+What the mulligan comparison in [jev.md](jev.md) says about the coaching
+models themselves (64 real hands; agreement with the player's keeps, not
+correctness):
+
+- **Sonnet 5 was the strongest Claude arm.** It agreed with the player's
+  keeps measurably more often than Haiku 4.5 or Haiku 5.5.
+- **Haiku 5.5 at `medium` effort wasn't measurably better than Haiku 4.5**
+  on this task. It costs about 3.5x less per hand.
+- **Haiku 5.5 at `low` was measurably worse than at `medium`.** Turning the
+  effort down for speed is a quality trade.
+- **Choice decisions are better off on Jev:** it ties all of them within the
+  error bars, at 0.2s and about 1/100 of Sonnet 5's cost.

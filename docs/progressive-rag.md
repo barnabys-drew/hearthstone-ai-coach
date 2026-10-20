@@ -345,6 +345,34 @@ SOC transfer: analyst overrides that proved correct become new dispositions
 
 ### 6e — Generation A/B (prompt & reasoning experiments) — gate: 6c baselines stable AND 6d names a lever
 
+**First experiment run 2026-10-19: model routing for choice decisions.** Ran
+ahead of the 6c gate because it needs no live games: every ranked game's
+opening hand and the cards kept are already in `games.db`, so the mulligan
+can be replayed offline against any model (`lab/mulligan-ab/`).
+
+- **Setup:** seven arms on 64 hands, three repeats each — Jev 1.13 (with and
+  without the deck list), Haiku 5.5 at `low` and `medium`, Haiku 4.5,
+  Sonnet 5 and Sonnet 5.5. Confidence intervals come from a paired bootstrap
+  over hands.
+- **Agreement:** Jev agreed with the player's keeps 70.9% of the time;
+  Sonnet 5 74.0%, a gap inside the error bars.
+- **The rest:** Jev was the most consistent arm (96% identical across
+  repeats), 0.2s per answer, about 1/100 of Sonnet 5's cost.
+- **Decision:** mulligans and Discovers route to Jev inside the tracker
+  (`hstracker/jev.py`, `HS_JEV=1`). Turn plans stay with a generative model.
+- **Logging:** every Jev answer is an `advice` event with
+  `model: jev-1.13.0`, `variant: jev` and its probabilities, so the 6b/6c
+  machinery scores it like any other advice. Full write-up: [jev.md](jev.md).
+
+SOC transfer, and the reason this belongs in the lab: route each
+decision to the cheapest model built for its shape. "Which of these few
+dispositions" is classification. A classifier answering in 0.2s for a
+hundredth of the price beats a chat agent on cost and latency, and here it
+matched on agreement. The general model's budget goes to the parts that are
+really generation. Same measure-before-routing discipline as every tier
+above: the routing was adopted because seven arms on real data showed it
+holds, not because classifiers are fashionable.
+
 Only now, with a scorecard to read, is changing the generator justified:
 
 - A/B the coaching procedure: prompt variants, reasoning-check branches

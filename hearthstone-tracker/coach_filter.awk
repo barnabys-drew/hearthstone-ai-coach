@@ -7,6 +7,7 @@
 #   - == TURN blocks ONLY for "your turn" (with detail lines)
 #   - == EXTRA TURN blocks
 #   - == DISCOVER PENDING lines (options are inline)
+#   - == JEV MULLIGAN / == JEV DISCOVER lines (Jev already answered; HS_JEV=1)
 #   - == UPDATE lines ONLY when cards were added to MY hand mid-turn
 #     (discover results / generated cards — e.g. a bomb discounted to 0),
 #     or when board minion stats changed DURING MY TURN (so the coach sees
@@ -20,6 +21,7 @@
 /^== MULLIGAN/  { inblk = 1; print; fflush(); next }
 /^== EXTRA TURN/ { inblk = 1; print; fflush(); next }
 /^== DISCOVER PENDING/ { print; fflush(); next }
+/^== JEV /      { print; fflush(); next }
 /^== GAME OVER/ { inblk = 0; print; fflush(); next }
 /^== UPDATE/    { inblk = 0; if ($0 ~ /my hand \+/ || (myturn && $0 ~ /board: /)) { print; fflush() } next }
 /^==/           { inblk = 0; next }

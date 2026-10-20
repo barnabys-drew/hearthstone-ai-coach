@@ -4,7 +4,10 @@
 > coaching over the game's own logs, a native five-panel overlay (advice, deck
 > tracker, opponent tracker, lessons, deck stats), a trigger-matched lessons
 > engine that learns from your misplays — plus the deck recommender/builder
-> CLI tools it grew from. Doubles as a hands-on lab for progressive,
+> CLI tools it grew from. Mulligans and Discovers go to TypeSafe's **Jev**
+> classifier, which answers in ~0.2s for about 1/100 of the cost of the best
+> chat model. That choice came out of a seven-model comparison on real games
+> ([docs/jev.md](docs/jev.md)). Doubles as a hands-on lab for progressive,
 > cost-conscious RAG ([docs/progressive-rag.md](docs/progressive-rag.md)).
 >
 > *Formerly `hearthstone-deck-recommender` — old GitHub URLs redirect.*
@@ -25,7 +28,9 @@ cards and dust. Two problems:
    your games in real time, shows you turn-by-turn advice ("what's my play?") with the
    actual hand, board, and lethal math in front of you, learns from your misplays and
    past games to build a personal playbook, and feeds an always-on-top overlay so the
-   advice stays right there while you play.
+   advice stays right there while you play. The mulligan card is on the overlay about a
+   second after the hand is dealt, because the tracker asks Jev directly instead of
+   waiting on a chat model.
 
 [![CI](https://github.com/barnabys-drew/hearthstone-ai-coach/actions/workflows/ci.yml/badge.svg)](https://github.com/barnabys-drew/hearthstone-ai-coach/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
@@ -79,7 +84,8 @@ Also in this repo:
   snapshot every turn: hand with card text, board with buffs, HP/armor/mana,
   remaining deck outs, opponent play history, and lethal math. An AI agent reads
   these snapshots and advises turn-by-turn, drawing from the actual game state
-  (not model memory). Includes a rigorous checklist and traps from real-game
+  (not model memory). With `HS_JEV=1`, mulligans and Discovers are answered by
+  Jev from inside the tracker, before the agent has read the marker. Includes a rigorous checklist and traps from real-game
   validation. See its [architecture & checklist](hearthstone-live-coach/README.md).
 
 - **[`hearthstone-overlay`](hearthstone-overlay/README.md)** — a native
@@ -100,12 +106,43 @@ Also in this repo:
   win-rate delta vs. the deck's baseline, flags dead draws, and pairs with the
   deck recommender's substitute-suggestion logic to propose replacements.
 
-> **Model-agnostic:** nothing in this repo calls an LLM API or depends on a
-> specific model. The coach is whatever AI CLI you already use — Claude Code,
-> Codex, Cursor, Gemini CLI, or a plain chat window — following the same
-> SKILL.md playbook over the same feed. See
-> [docs/coach-with-any-model.md](docs/coach-with-any-model.md) for per-agent
-> setup.
+## Choice decisions on Jev: a seven-model comparison
+
+The coach makes two kinds of decision. Turn plans are generation: numbered
+moves and lethal math on a 15-second timer. Mulligans and Discovers are
+classification: a few options, each one keep or toss, pick or pass. I measured
+which model should make the second kind by replaying 64 real opening hands
+from `games.db` against seven arms, three repeats each
+([`lab/mulligan-ab/`](lab/mulligan-ab/)):
+
+| Arm | Agrees with my keeps (95% CI) | Same answer every repeat | Median latency | Cost per hand |
+|---|---|---|---|---|
+| Sonnet 5 | 74.0% (68.2–79.9) | 91% | 2.4s | $0.0036 |
+| **Jev 1.13** | **70.9% (64.6–77.0)** | **96%** | **0.21s** | **$0.000035** |
+| Sonnet 5.5 | 70.0% (63.8–75.8) | 95% | 2.2s | $0.0035 |
+| Haiku 5.5 (`medium`) | 69.7% (63.9–75.9) | 82% | 3.6s | $0.00038 |
+| Haiku 4.5 | 67.8% (61.8–73.9) | 85% | 2.2s | $0.0013 |
+
+- **Agreement:** within the error bars, Jev ties every model tested,
+  including the best one. Sonnet 5's +3.1 points can't be told from zero
+  with 64 hands.
+- **The rest:** Jev is the most consistent arm, about ten times faster, and
+  about 1/100 of Sonnet 5's cost. A thousand mulligans cost 3.5 cents.
+- **So the tracker now asks Jev itself** (`HS_JEV=1`) and the chat model
+  keeps the turns.
+
+The full comparison is in [docs/jev.md](docs/jev.md): every arm, which
+differences are real, what Jev's deck-list sensitivity shows, and the limits.
+The scores measure agreement with my keeps, not correctness.
+
+> **Model-agnostic turn coaching, one opt-in classifier.** The turn coach is
+> whatever AI CLI you already use — Claude Code, Codex, Cursor, Gemini CLI, or
+> a plain chat window — following the same SKILL.md playbook over the same
+> feed. See [docs/coach-with-any-model.md](docs/coach-with-any-model.md) for
+> per-agent setup. The only model API the tracker calls itself is Jev, for
+> mulligans and Discovers, and only with `HS_JEV=1` and a `TYPESAFE_API_KEY`.
+> Without them the coach model answers those as well, and tracking, the
+> overlay and game recording never depend on either.
 
 > **Status:** Useful working prototype. Public-card/deck data changes often, so agents should still browse current top-deck sources before recommending a deck.
 
@@ -323,12 +360,17 @@ hearthstone-overlay/
 hearthstone-tracker/
   hst          # CLI launcher (backfill | watch | live | stats)
   hstracker/   # Power.log -> SQLite capture, live snapshots, stats, overlay bridge
+               #   jev.py: mulligan + Discover answers from Jev (HS_JEV=1)
   coach_publish.py  # publish coach advice/discover picks/lessons to the overlay
   requirements.txt
+
+lab/
+  mulligan-ab/ # offline seven-arm mulligan comparison (Jev vs Haiku/Sonnet); see docs/jev.md
 
 examples/     # stable synthetic fixtures
 tests/        # standard-library unittest suite (tracker tests need hslog)
 docs/         # collection/meta guides, model-agnostic coach setup,
+              # jev.md: the model comparison behind the Jev routing,
               # progressive-rag.md: the lessons engine as a RAG learning lab
 ```
 
@@ -342,6 +384,10 @@ docs/         # collection/meta guides, model-agnostic coach setup,
   reads game memory or network traffic.
 - The default live fetch scrapes one public deck site (hearthstone-decks.net). Site layouts change; if the fetch comes back empty, browse current top-deck sites and pass `--decks meta_decks.json` instead. Recommendations are only as current as the decks that come in.
 - There is no HSReplay meta-statistics integration (no official public API); win rates appear only when your deck entries include them.
+- Jev's mulligan answers are measured against one player's keeps over 64
+  hands, not against a known-correct answer, and its Discover picks aren't
+  measured yet. Every live answer is logged with its probabilities so both
+  can be scored as games accumulate ([docs/jev.md](docs/jev.md#limits-stated-plainly)).
 - Card-name ambiguity is real in Hearthstone. For exact import correctness, DBF IDs are safer than names.
 - Sideboard deckstring support follows the public deckstrings convention but should be tested against real edge-case decklists before heavy public promotion.
 

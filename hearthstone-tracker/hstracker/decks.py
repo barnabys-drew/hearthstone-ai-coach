@@ -50,6 +50,18 @@ def _looks_like_deckstring(code: str) -> bool:
     return len(raw) > 4 and raw[0] == 0 and raw[1] == 1
 
 
+def deckstring_format(code: str) -> int | None:
+    """FormatType id (1 Wild, 2 Standard, ...) from a deckstring, or None.
+
+    The header is three varints — reserved (0), version (1), format — and all
+    three are below 128, so the format is simply the third byte."""
+    try:
+        data = base64.b64decode("".join(code.split()))
+    except Exception:
+        return None
+    return data[2] if len(data) > 2 and not data[2] & 0x80 else None
+
+
 def decode_deckstring_counts(code: str) -> dict[int, int]:
     """{dbfId: count} decoded from a deckstring; {} if it can't be decoded."""
     try:

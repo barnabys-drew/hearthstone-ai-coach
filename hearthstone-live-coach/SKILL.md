@@ -33,7 +33,10 @@ allowed to see (the opponent's hand appears only as a hidden-card count).
 
 This skill is deliberately procedural and model-agnostic: any AI agent that
 can run shell commands and follow this playbook can coach (see
-`docs/coach-with-any-model.md`). Follow it exactly even if you believe you
+`docs/coach-with-any-model.md`). With Jev switched on, the two choice
+decisions (mulligan and Discover) are answered by the tracker itself through
+TypeSafe's Jev classifier, and you coach the turns — see "Mulligans and
+Discovers: Jev answers them" below and `docs/jev.md`. Follow it exactly even if you believe you
 know the game well — several of the rules below exist because a capable model
 got them wrong in live play.
 
@@ -78,8 +81,10 @@ same mistake doesn't repeat game after game.
 
 1. Start the feed via the launcher — NEVER by running `./hst live` directly:
    ```bash
-   HS_COACH_GATED=1 <repo>/hearthstone-tracker/coach_feed.sh
+   HS_JEV=1 HS_COACH_GATED=1 <repo>/hearthstone-tracker/coach_feed.sh
    ```
+   `HS_JEV=1` (with `TYPESAFE_API_KEY` exported) hands mulligans and Discovers
+   to Jev. Leave it off and you answer those too, exactly as before.
    It kills any zombie feed from previous sessions (detached children outlive
    their shell wrappers and TaskStop — a 2-day-old zombie once fed a whole
    session through a corrupt shared log), starts exactly ONE feed appending to
@@ -102,7 +107,7 @@ same mistake doesn't repeat game after game.
    while a game runs means missed turns (this happened in a real session).
    `coach_filter.awk` passes ONLY decision points: MULLIGAN / your-turn TURN
    blocks (with their indented detail lines) / EXTRA TURN / DISCOVER PENDING /
-   GAME OVER / `!!` + errors / and `== UPDATE` lines that ADD cards to YOUR
+   JEV MULLIGAN / JEV DISCOVER / GAME OVER / `!!` + errors / and `== UPDATE` lines that ADD cards to YOUR
    hand (discover results, generated cards — e.g. a bomb discounted to 0).
    Opponent-turn chatter is dropped at the filter so the model isn't queued
    behind filler when a real decision arrives — do not respond to events the
@@ -145,6 +150,45 @@ same mistake doesn't repeat game after game.
    override) adds card rules text and flags; read it only when you need those.
    When you do read it, always re-read fresh — it is rewritten continuously.
 
+## Mulligans and Discovers: Jev answers them (when the feed runs with `HS_JEV=1`)
+
+The tracker asks Jev on its own thread the moment a hand is dealt or a
+Discover is offered, publishes the answer to the overlay, logs it, and prints
+one line to the feed:
+
+```
+== JEV MULLIGAN (0.3s) — keep: Slam 81%, Rockskipper 68% | toss: For Glory! 22%
+== JEV DISCOVER (0.2s) — Tracking: Pick Bait and Switch — Jev 72% (vs ...)
+```
+
+Why Jev and not you: on 64 real opening hands it matched the player's keeps
+about as well as every Claude model tested, Sonnet 5 included (the gap is
+inside the error bars), answered the same way 96% of the time, and took
+~0.2s at about 1/100 of Sonnet 5's cost (`docs/jev.md`). You are slower and
+more expensive at a decision that is a classification, and your turn budget
+is better spent on the turns.
+
+So, with Jev on:
+
+- **On `== MULLIGAN`: do nothing yet.** The `== JEV MULLIGAN` line follows
+  within a second or two. Do **not** publish a `kind=mulligan` card; Jev's is
+  already on the overlay. In chat, relay it in one line ("Jev: keep Slam,
+  Rockskipper; toss For Glory!"). If the card text gives you a concrete reason
+  a keep is unplayable in this matchup, add ONE line saying so — chat only;
+  never overwrite Jev's overlay card, or the comparison breaks.
+- **On `== JEV DISCOVER`:** the pick is already on the overlay. Say nothing
+  unless you have a concrete reason it's wrong (one line, chat only).
+- **On `!! Jev mulligan failed` / `!! Jev discover failed`, or if no `== JEV`
+  line arrives within ~5s:** answer it yourself the normal way (publish
+  included). The failure is already logged.
+- Discover picks are a judgment Jev has not been measured on yet (the A/B
+  covered mulligans). Its Discover answers are logged with their
+  probabilities so they can be scored later; treat them as a strong default,
+  not ground truth.
+
+With Jev off, ignore this section: the `== MULLIGAN` and `== DISCOVER
+PENDING` rules below apply as written.
+
 ## Terminology: Always Use "End Turn" Not "Pass"
 
 When advising the user to end their turn with no more plays, always write **"End Turn"** — never "Pass". This matches the button in Hearthstone's UI and is clearer for in-game advice.
@@ -165,13 +209,15 @@ together); a failed publish must never delay the chat advice.
 shortest window** (real recurring failure: multiple sessions gave chat-only
 mulligan advice and the overlay sat on a stale card all game). On the
 `== MULLIGAN` marker, the `kind=mulligan` publish goes out with your keep/toss
-answer — before turn 1 advice, no exceptions.
+answer — before turn 1 advice, no exceptions. (With Jev on, the tracker makes
+that publish itself; you publish only if a `!! Jev ... failed` line says it
+couldn't.)
 
 Use `../hearthstone-tracker/coach_publish.py` (or the absolute repo path) and
 keep the payload short enough to scan while playing.
 
 **Every publish carries `--model` (Phase 6a, required).** Pass the model
-name your system prompt says is powering you (e.g. `--model haiku-4-5`).
+name your system prompt says is powering you (e.g. `--model haiku-5-5`).
 It shows on the advice panel footer, and it is the attribution key for the
 advice telemetry — untagged advice events show up in `hst coach-report` as
 `(untagged)` and can't be cost-attributed. Set it once per session via
@@ -183,7 +229,7 @@ advice telemetry — untagged advice events show up in `hst coach-report` as
 is unmeasurable.
 
 ```bash
-<repo>/hearthstone-tracker/coach_publish.py --model haiku-4-5 --variant gated --json '{
+<repo>/hearthstone-tracker/coach_publish.py --model haiku-5-5 --variant gated --json '{
   "kind": "turn",
   "turn": 5,
   "headline": "Stabilize the board",
@@ -466,7 +512,7 @@ have killed it for them.
   attacks BEFORE spells, so burn can be re-aimed if a deathrattle or hidden
   armor changes the math mid-sequence. If it's near-lethal, state the exact
   shortfall instead.
-- Mulligan (`== MULLIGAN` marker): **bullet list** of keep/toss recommendations,
+- Mulligan (`== MULLIGAN` marker, Jev off or failed): **bullet list** of keep/toss recommendations,
   one card per line with a few words of reasoning. User scans it in seconds
   before locking in. In the SAME batch, publish it:
   `coach_publish.py --json '{"kind":"mulligan","turn":1,"mulligan":[{"card":"...","keep":true,"reason":"..."}]}'`
