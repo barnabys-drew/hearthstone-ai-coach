@@ -48,7 +48,6 @@ sessions with the overlay's choices picker on **Both**.
   `hst selftest` warns when it drifts.
 - **Mulligan and Discover readouts in `hst coach-report`** (#20, #19): built,
   and waiting on Both-mode games to fill them.
-
 - Jev answers mulligans and Discovers, chosen by a seven-model comparison
   ([docs/jev.md](docs/jev.md)).
 - An overlay picker chooses who answers them: Jev, Coach, Both or Off.
