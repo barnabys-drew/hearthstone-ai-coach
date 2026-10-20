@@ -117,11 +117,17 @@ def check_plan(steps: list[str], snap: dict[str, Any]) -> list[dict[str, str]]:
             if re.match(r"^[A-Z0-9'][\w'!,.\- ]{2,}$", cand):  # looks like a real card name
                 warnings.append({"rule": "unknown card",
                                  "detail": f"'{cand}' isn't in hand, on the board, or in the deck"})
+    # "refresh 2 Mana Crystals" (Darkscale Broodmother) restores spent mana
+    # mid-turn, so it adds to the budget; the plan check missed it and gave a
+    # false alarm on a legal line in a real game.
+    refreshed = sum(int(m.group(1)) for step in steps
+                    for m in re.finditer(r"refresh(?:es)?\s+(\d+)\s+mana", step, re.I))
     mana = me.get("mana")
-    if isinstance(mana, int) and spent > mana + coins:
+    if isinstance(mana, int) and spent > mana + coins + refreshed:
         warnings.append({"rule": "mana",
-                         "detail": f"plays from hand cost {spent} but only {mana + coins} mana is available"
-                                   + (" (with The Coin)" if coins else "")})
+                         "detail": f"plays from hand cost {spent} but only {mana + coins + refreshed} mana is available"
+                                   + (" (with The Coin)" if coins else "")
+                                   + (f" (+{refreshed} refreshed)" if refreshed else "")})
 
     # --- face attacks past a taunt nobody dealt with ------------------------
     face_at = next((i for i, s in enumerate(steps) if _ATTACK_FACE_RE.search(s)), None)

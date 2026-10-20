@@ -56,6 +56,17 @@ class RealMissesTests(unittest.TestCase):
         self.assertEqual(rules(w), ["mana"])
         self.assertIn("cost 7 but only 6", w[0]["detail"])
 
+    def test_refreshed_mana_counts_toward_the_budget(self):
+        hand = [card("Darkscale Broodmother", 3), card("Precursory Strike", 2)]
+        steps = ["Play Darkscale Broodmother (3 mana). Battlecry refreshes 2 Mana Crystals",
+                 "Play Precursory Strike (2 mana) → Murloc Tidehunter (dies)"]
+        self.assertEqual(rules(check_plan(steps, snap(hand=hand, mana=3))), [],
+                         "3 + 2 refreshed covers 5")
+        self.assertEqual(rules(check_plan(steps, snap(hand=hand, mana=2))), ["mana"],
+                         "the refresh still needs the 3 mana to start")
+        self.assertEqual(rules(check_plan(steps[1:], snap(hand=hand, mana=3))), [],
+                         "2 of 3 mana for the Strike")
+
     def test_card_that_exists_nowhere(self):
         s = snap(hand=[card("Slam", 1)], deck=["Torch"])
         w = check_plan(["Play Time-Twisted Seer (1 mana)", "Cast Slam -> Darkrider"], s)
