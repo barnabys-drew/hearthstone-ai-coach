@@ -553,6 +553,7 @@ def cmd_rag_maintain(args) -> int:
 def cmd_coach_report(args) -> int:
     from pathlib import Path as _P
 
+    from . import advice as advice_mod
     from .advice import coach_report
     from .raglog import read_events
 
@@ -577,6 +578,14 @@ def cmd_coach_report(args) -> int:
     print("## Latency (turn marker -> advice publish)")
     print(stats_mod.format_table([report["latency"]]))
     print()
+    if report["latency_by_bucket"]:
+        print(f"## Latency by turn bucket  (deadline {advice_mod.TURN_DEADLINE_S:.0f}s)")
+        print(stats_mod.format_table(report["latency_by_bucket"]))
+        print()
+    if report["latency_by_variant"]:
+        print("## Latency by variant  (gated vs full — the check-gate A/B)")
+        print(stats_mod.format_table(report["latency_by_variant"]))
+        print()
     if report["outcomes"]:
         o = report["outcomes"]
         print("## Outcomes by adherence (proxy, threshold 0.5)")

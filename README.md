@@ -34,21 +34,15 @@ cards and dust. Two problems:
 
 ## Screenshots
 
-| Deck tracker + deck stats | AI coach mulligan advice |
-|---------------------------|-----------------------------------|
-| ![Deck tracker and stats panels](docs/screenshots/deck-tracker-stats.png) | ![AI coach mulligan recommendations](docs/screenshots/coach-mulligan-advice.png) |
+| Deck tracker + deck stats | AI coach mulligan advice | AI coach tactical advice + lessons |
+|----------------------------|---------------------------|-------------------------------------|
+| ![Deck tracker and stats panels](docs/screenshots/deck-tracker-stats.png) | ![AI coach mulligan recommendations](docs/screenshots/coach-mulligan-advice.png) | ![AI coach tactical advice with lessons](docs/screenshots/coach-tactical-advice.png) |
 
-**Top left:** The HDT-style deck tracker mid-game — your original deck list with draw percentages at the top, plus every generated/shuffled card the tracker detected from the log. Below that, the per-deck stats panel showing your historical win rates against each matchup.
+**Deck tracker + stats:** The HDT-style deck tracker mid-game — your original deck list with draw percentages at the top, plus every generated/shuffled card the tracker detected from the log. Below that, the per-deck stats panel showing your historical win rates against each matchup.
 
-**Top right:** The AI coach analyzing your mulligan with turn-by-turn card recommendations. Each card shows a KEEP (green) or TOSS (red) decision with reasoning: "Agent of the Old Ones — KEEP, Turn 1 tempo generates Coin for Whip scaling" or "Eventuality — TOSS, Too slow for early tempo race." The coach sees your full hand, knows the matchup (opponent shown top-right), and explains each decision in real time.
+**Mulligan advice:** The AI coach analyzing your opening hand with turn-by-turn KEEP (green) / TOSS (red) recommendations and reasoning: "Agent of the Old Ones — KEEP, Turn 1 tempo generates Coin for Whip scaling" vs. "Eventuality — TOSS, Too slow for early tempo race." The coach sees your full hand and the matchup (opponent shown top-right) and explains each decision in real time.
 
-| AI coach mulligan (first-turn keep/toss) | AI coach tactical advice (multi-turn sequencing + lessons) |
-|---------------------------|-----------------------------------|
-| ![AI coach mulligan recommendations](docs/screenshots/coach-mulligan-advice.png) | ![AI coach tactical advice with lessons](docs/screenshots/coach-tactical-advice.png) |
-
-**Bottom left (Mulligan example):** Turn-by-turn analysis of your opening hand. The coach shows five cards with KEEP (green) or TOSS (red) recommendations and reasoning for each. Example: "Agent of the Old Ones — KEEP, Turn 1 tempo generates Coin for Whip scaling" vs. "Eventuality — TOSS, Too slow for early tempo race."
-
-**Bottom right (Tactical advice example):** Multi-step turn sequencing with complex choices. The coach presents five numbered options (swing, play cards, cast spells, play minion, end turn) along with warnings about hazards — here, a highlighted alert that the opponent's Blob of Tar is Poisonous. Below, the coaching lessons panel shows a learned lesson flagged from past misplays: "Never trade a big minion into a Poisonous body; chump-block or hero-swing (heroes can't be poisoned)" — the AI learns from mistakes and surfaces that knowledge in real time.
+**Tactical advice + lessons:** Multi-step turn sequencing with numbered options (swing, play cards, cast spells, play minion, end turn) and inline hazard warnings — here, a highlighted alert that the opponent's Blob of Tar is Poisonous. Below, the coaching lessons panel surfaces a learned lesson from past misplays: "Never trade a big minion into a Poisonous body; chump-block or hero-swing (heroes can't be poisoned)" — the AI learns from mistakes and surfaces that knowledge in real time.
 
 ## Two ways to use it
 

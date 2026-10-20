@@ -25,6 +25,9 @@ from hslog.export import FriendlyPlayerExporter
 from .capture import _CREATE_GAME_MARKER, TolerantExporter, _player_names
 from .cardevents import extract_card_events
 from .cards import HeroClassResolver
+from .checks import format_checks
+from .checks import gated_enabled as checks_gated_enabled
+from .checks import live_checks
 
 _FLAG_TAGS = (
     (GameTag.TAUNT, "taunt"),
@@ -683,6 +686,8 @@ def format_snapshot(snap: dict[str, Any]) -> str:
         if texts:
             lines.append("   card text (hand + boards):")
             lines.extend(texts)
+        if checks_gated_enabled():
+            lines.extend(format_checks(live_checks(snap)))
         matched = snap.get("lessons_matched") or []
         if matched:
             lines.append(f"   lessons matched ({len(matched)}) — past misplays relevant RIGHT NOW:")

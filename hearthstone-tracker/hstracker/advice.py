@@ -34,6 +34,7 @@ _CREATE_GAME = "CREATE_GAME"
 
 FOLLOWED_THRESHOLD = 0.5  # proxy score at/above which advice counts as followed
 LATENCY_PAIR_WINDOW = 180.0  # seconds an advice may trail its turn marker
+TURN_DEADLINE_S = 15.0  # the coaching contract's response budget (SKILL.md)
 
 
 def game_actions(session_dir: Path) -> dict[int, dict[str, Any]]:
@@ -111,15 +112,19 @@ def _match_ts_index(events: list[dict[str, Any]]) -> dict[tuple, float]:
     return index
 
 
-def latency_rows(events: list[dict[str, Any]]) -> list[float]:
-    """Seconds from a turn's first marker to its advice publish. Advice
-    events lack (session, game_no) — pair by display turn against the most
-    recent preceding marker within the window."""
+def latency_detail_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Per-advice latency, tagged with the turn and the experiment arm.
+
+    A single global median is what let a ~30s median hide behind a 15s target
+    for weeks: it answered "how slow are we" but never "slow *where*". Keeping
+    turn and variant on each row is what makes the gated-vs-full A/B and the
+    early/mid/late split fall out for free.
+    """
     markers = sorted(
         ((ev.get("ts") or 0, ev.get("turn")) for ev in events
          if ev.get("ev") == "match" and not ev.get("replay") and ev.get("ts")),
     )
-    out = []
+    out: list[dict[str, Any]] = []
     for ev in events:
         if ev.get("ev") != "advice" or not ev.get("ts"):
             continue
@@ -131,8 +136,53 @@ def latency_rows(events: list[dict[str, Any]]) -> list[float]:
             if mturn == turn and ts - mts <= LATENCY_PAIR_WINDOW:
                 best = ts - mts
         if best is not None:
-            out.append(round(best, 1))
+            out.append({"turn": turn, "secs": round(best, 1),
+                        "variant": ev.get("variant") or "(untagged)",
+                        "kind": ev.get("kind")})
     return out
+
+
+def latency_rows(events: list[dict[str, Any]]) -> list[float]:
+    """Seconds from a turn's first marker to its advice publish."""
+    return [r["secs"] for r in latency_detail_rows(events)]
+
+
+def _bucket(turn: Any) -> str:
+    if not isinstance(turn, int):
+        return "?"
+    if turn <= 4:
+        return "early (1-4)"
+    if turn <= 8:
+        return "mid (5-8)"
+    return "late (9+)"
+
+
+def _latency_stats(secs: list[float]) -> dict[str, Any]:
+    s = sorted(secs)
+
+    def pct(p: float) -> float | None:
+        return s[int(p * (len(s) - 1))] if s else None
+
+    over = sum(1 for x in s if x > TURN_DEADLINE_S)
+    return {"n": len(s), "median_s": pct(0.5), "p90_s": pct(0.9),
+            "over_deadline": f"{over}/{len(s)}" if s else "0/0"}
+
+
+def latency_splits(events: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Latency broken out by turn bucket and by experiment arm."""
+    rows = latency_detail_rows(events)
+    by_bucket, by_variant = {}, {}
+    for r in rows:
+        by_bucket.setdefault(_bucket(r["turn"]), []).append(r["secs"])
+        by_variant.setdefault(r["variant"], []).append(r["secs"])
+    order = {"early (1-4)": 0, "mid (5-8)": 1, "late (9+)": 2, "?": 3}
+    return {
+        "by_bucket": [dict(bucket=k, **_latency_stats(v))
+                      for k, v in sorted(by_bucket.items(),
+                                         key=lambda kv: order.get(kv[0], 9))],
+        "by_variant": [dict(variant=k, **_latency_stats(v))
+                       for k, v in sorted(by_variant.items())],
+    }
 
 
 def contradictions(advice_events: list[dict[str, Any]],
@@ -228,10 +278,13 @@ def coach_report(events: list[dict[str, Any]],
     overrode_n = sum(1 for f, _ in followed_results if not f)
     agree = sum(1 for a, b in feedback_pairs if a == b)
 
+    splits = latency_splits(events)
     return {
         "games": volume,
         "latency": {"paired": len(latencies), "median_s": pct(0.5),
                     "p90_s": pct(0.9)},
+        "latency_by_bucket": splits["by_bucket"],
+        "latency_by_variant": splits["by_variant"],
         "outcomes": {
             "followed": followed_n, "followed_won": followed_won,
             "overrode": overrode_n, "overrode_won": overrode_won,

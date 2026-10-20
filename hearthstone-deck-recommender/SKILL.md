@@ -49,7 +49,15 @@ Try these in order; stop at the first that works for the user.
 
 1. **HSReplay collection JSON (most reliable).** The user connects Blizzard to a
    deck tracker (Hearthstone Deck Tracker on Windows, or Firestone) at least once so
-   the collection uploads. Then, logged in at `https://hsreplay.net/collection/mine/`,
+   the collection uploads. **Collection uploading is a separate opt-in feature, not
+   automatic just because the tracker is running and logged in** — HDT shows a banner
+   ("New HSReplay.net Feature: Collection Uploading — Find the best decks for your
+   collection!") that must be clicked to turn it on. If a fetched/saved collection
+   JSON looks stale (dust total or card counts don't match what the user can actually
+   play), check for that banner before assuming a browser-cache issue — re-capturing
+   the network request will keep returning the same old snapshot until uploading is
+   actually enabled and had a minute to sync. Then, logged in at
+   `https://hsreplay.net/collection/mine/`,
    open browser DevTools (F12) → Network, reload, and copy the JSON response from the
    request whose URL contains `account_lo=`. Save it as `collection.json`. It looks
    like `{"collection": {"<dbfId>": [normal, golden, diamond, signature], ...}, ...}`.

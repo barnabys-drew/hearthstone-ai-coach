@@ -9,7 +9,7 @@ sys.path.insert(0, str(ROOT / "hearthstone-tracker"))
 
 from hstracker.advice import (  # noqa: E402
     adherence_score, advised_names, coach_report, contradictions,
-    game_actions, latency_rows,
+    game_actions, latency_rows, latency_splits,
 )
 
 
@@ -75,6 +75,40 @@ class AdherenceTests(unittest.TestCase):
                                           self.actions({})))
         self.assertIsNone(adherence_score(advice_ev(3, ["nothing known"], 1.0),
                                           self.actions({})))
+
+
+class LatencySplitTests(unittest.TestCase):
+    """A single global median hid a 30s p50 behind a 15s target. The splits are
+    what make the gate's effect visible."""
+
+    def events(self):
+        return [
+            match_ev(2, 100.0), advice_ev(2, ["a"], 105.0, variant="gated"),
+            match_ev(6, 200.0), advice_ev(6, ["a"], 240.0, variant="full"),
+            match_ev(10, 300.0), advice_ev(10, ["a"], 320.0, variant="full"),
+        ]
+
+    def test_buckets_split_early_mid_late(self):
+        got = {r["bucket"]: r for r in latency_splits(self.events())["by_bucket"]}
+        self.assertEqual(got["early (1-4)"]["median_s"], 5.0)
+        self.assertEqual(got["mid (5-8)"]["median_s"], 40.0)
+        self.assertEqual(got["late (9+)"]["median_s"], 20.0)
+
+    def test_over_deadline_counted_against_the_15s_contract(self):
+        got = {r["bucket"]: r for r in latency_splits(self.events())["by_bucket"]}
+        self.assertEqual(got["early (1-4)"]["over_deadline"], "0/1")  # 5s is fine
+        self.assertEqual(got["mid (5-8)"]["over_deadline"], "1/1")  # 40s is not
+
+    def test_variant_arms_are_separated_for_the_ab(self):
+        got = {r["variant"]: r for r in latency_splits(self.events())["by_variant"]}
+        self.assertEqual(got["gated"]["n"], 1)
+        self.assertEqual(got["gated"]["median_s"], 5.0)
+        self.assertEqual(got["full"]["n"], 2)
+
+    def test_untagged_advice_is_its_own_arm(self):
+        evs = [match_ev(3, 10.0), advice_ev(3, ["a"], 20.0)]  # no variant
+        got = {r["variant"]: r for r in latency_splits(evs)["by_variant"]}
+        self.assertIn("(untagged)", got)
 
 
 class ContradictionTests(unittest.TestCase):

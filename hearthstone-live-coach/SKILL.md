@@ -78,13 +78,19 @@ same mistake doesn't repeat game after game.
 
 1. Start the feed via the launcher — NEVER by running `./hst live` directly:
    ```bash
-   <repo>/hearthstone-tracker/coach_feed.sh
+   HS_COACH_GATED=1 <repo>/hearthstone-tracker/coach_feed.sh
    ```
    It kills any zombie feed from previous sessions (detached children outlive
    their shell wrappers and TaskStop — a 2-day-old zombie once fed a whole
    session through a corrupt shared log), starts exactly ONE feed appending to
    a FRESH per-run log file (no truncation races with tail -F), verifies it
    survived startup, and prints `FEED_PID=` and `LOG=<path>` on success.
+
+   `HS_COACH_GATED=1` turns on the per-turn **check gate** (the `decision class`
+   / `checks live` marker lines — see the per-turn procedure). It is the latency
+   fix and it is opt-in while it earns its evidence. When it is on, publish with
+   `--variant gated`; when it is off, `--variant full`. That is what makes the
+   A/B in `hst coach-report` real instead of anecdotal.
 2. Watch the feed with a persistent Monitor running the repo's watcher (it
    follows the stable symlink `/tmp/hst_coach_current.log` BY NAME, so it
    survives feed restarts, and it includes the liveness watchdog — silence
@@ -171,8 +177,13 @@ advice telemetry — untagged advice events show up in `hst coach-report` as
 `(untagged)` and can't be cost-attributed. Set it once per session via
 `export HS_COACH_MODEL=<model>` if you prefer; the flag wins over the env.
 
+**Every publish also carries `--variant`** — `gated` if the markers show
+`checks live`, `full` if they don't. This is the only thing that lets
+`hst coach-report` compare the two arms' latency; skip it and the experiment
+is unmeasurable.
+
 ```bash
-<repo>/hearthstone-tracker/coach_publish.py --model haiku-4-5 --json '{
+<repo>/hearthstone-tracker/coach_publish.py --model haiku-4-5 --variant gated --json '{
   "kind": "turn",
   "turn": 5,
   "headline": "Stabilize the board",
@@ -268,10 +279,53 @@ decorative. In practice:
   turn.
 - Keep the output format below strictly: one why-sentence, numbered moves.
   Anything longer is unread by someone on a timer.
+- **Do not re-derive which rules apply.** If the marker carries `checks live`,
+  that list *is* the answer to "what do I need to think about". Measured: the
+  average turn has ~2 live checks, but the coach was deliberating over ~26
+  unconditional rules every turn, which is where the ~30s median came from.
 
 ## Per-turn procedure
 
-Work through this checklist before writing anything:
+### The marker tells you which checks to run
+
+Your-turn markers carry two computed lines:
+
+```
+   decision class: STANDARD
+   checks live (2) — run ONLY these:
+     taunt — 2 on their board: Stonehill Defender 1/4, Voidwalker 1/3
+     hero-attack — your hero can swing for 3
+```
+
+**The `checks live` list is authoritative. Run those checks and no others.**
+The tracker computed it deterministically from the same board you are reading,
+in the same pass that built the marker — it is not a hint, it is the answer to
+"which of my rules apply right now". A check that is not listed does not apply:
+its precondition is absent from the board. Do not re-derive the list, do not
+audit yourself against the full rule set below, and do not "just double-check"
+a check that did not fire. That re-derivation is what was costing ~30 seconds
+per turn against a 15-second timer.
+
+The checks are **fail-open**: when the board is ambiguous the tracker emits the
+check rather than suppressing it. So a short list is a real signal that the turn
+is simple, not evidence that something was missed.
+
+**`decision class`** sets how much rigor to spend:
+
+- **TRIVIAL** — no checks fired: a pure curve/tempo decision. Answer in **≤2
+  sentences**. Name the play and end turn. No arithmetic, no lethal math, no
+  numbered list unless there is genuinely more than one action.
+- **STANDARD** — run the listed checks, answer in the normal format.
+- **CRITICAL** — lethal is live in one direction or the other. Full rigor, and
+  the listed `lethal` / `survival` details are a starting point for your own
+  arithmetic, not a substitute for it. Never shortcut a CRITICAL turn.
+
+If the `checks live` lines are absent from the marker (the gate is off), fall
+back to running every check in the table below.
+
+### Always, on every turn — regardless of the checks
+
+These are cheap framing rules, not analysis. They cost no deliberation.
 
 1. **Advise from current state only.** Never advise from a previous turn's data
    or from what you predicted would happen. The user may not have followed
@@ -282,70 +336,128 @@ Work through this checklist before writing anything:
    Hearthstone cards is unreliable (sets rotate, cards get patched). A SPELL
    with "Deal N damage to a minion" needs a target and is not a body; a
    LOCATION is not a spell and has cooldowns; a WEAPON needs your hero to swing.
-3. **Count damage both ways.**
-   - Incoming: sum the opponent board's attack (windfury attacks TWICE; add
-     their weapon if they have one). Compare against `hp + armor`. If you'd die
-     to a full face swing, survival outranks everything else this turn.
-   - Outgoing: your board attack + weapon + burn from hand. Check lethal every
-     turn from about turn 5 on.
-4. **Respect the flags.** `taunt` must be attacked first (spells ignore it) —
-   **list EVERY taunt-flagged minion currently on the enemy board before
-   totaling face damage in any lethal/race plan.** A plan that clears one
-   taunt and then sends "remaining attackers face" is only valid if that was
-   the ONLY taunt; two simultaneous taunts need two attackers spent on them,
-   not one (real-game miss: opponent had both Stonehill Defender AND a
-   Voidwalker — spawned earlier by Voidlord's death — as Taunt at the same
-   time; the plan cleared only Stonehill and counted the Voidwalker's blocked
-   attacker as face damage anyway, so the declared lethal total was never
-   actually legal). Re-scan the full board list for the `taunt` flag as a
-   discrete step, not from memory of "the taunt minion" singular;
-   `divine shield` absorbs one hit — pop it with the cheapest ping before real
-   removal; `damaged` marks legal targets for damaged-only effects;
-   `exhausted` minions can't attack this turn (newly played or already acted);
-   `frozen`/`stealth` as usual. Also shown now: `poisonous` (destroys any
-   minion it damages — never chump-block it with a big body), `reborn` (dies
-   TWICE — it comes back at 1 HP, so never write "dies" in a plan against a
-   reborn minion without budgeting the second kill; real-game miss: a
-   two-card removal plan on Whelp of the Infinite left its Reborn copy
-   standing), `lifesteal`, `rush`, `immune`, and `untargetable` (dormant/
-   uninteractable — your spells and attacks cannot select it; skip it in
-   plans entirely until it wakes).
-5. **Spend the hero's attack.** `me.attack` > 0 means the hero can swing this
-   turn (weapon, or a temp buff like "+3 Attack this turn" — those expire at
-   end of turn). Always say explicitly where the swing goes: face when racing,
-   into a minion when stabilizing (mind the counterattack damage). Never let a
-   temp attack buff expire unused without stating why. If a spell grants
-   attack, sequence it: cast the spell first, then swing.
-6. **The Coin is a card, not a ritual.** Only recommend Coin when the extra
-   mana converts into a play that otherwise wouldn't fit this turn. Coin into
-   a 1-drop while mana floats just burns the Coin (real-game mistake: turn 1,
-   Coin + 1-cost minion with a native mana already available — the Coin added
-   nothing).
-7. **Check `deck_cards_left`** (your remaining deck) before advising a race:
-   "N of your M remaining cards deal face damage" is the difference between a
-   real race and a prayer.
-8. **Check `opp.played`** (everything the opponent has cast) before advising
-   around removal: if their board clears are spent, commit to the board; if
-   not, hold something back.
-9. **Deathrattle caution.** Eggs and token-spawners usually want to die; don't
-   recommend popping them without a reason. If the opponent's minion text
-   mentions a deathrattle payoff, factor it into trades.
-10. **Random-splash effects go last, or the plan is fiction.** A card whose
-    text says "randomly split"/"random enemy" (Erupting Volcano, Holy Nova-style
-    AoE) can kill your intended target before a later numbered step reaches it
-    — real-game miss: a plan said "cast Volcano, then finish [target] with a
-    direct-damage spell," but Volcano's random splash had already killed the
-    target, leaving no legal target for step 2. Sequence deterministic,
-    targeted removal FIRST; put random-splash cards last in the numbered list,
-    and say plainly that its target is not guaranteed.
-11. **Publish to the overlay in the same tool batch as the chat advice** (when
-    the overlay is running — payload shapes in the overlay publishing section).
-    Mulligan marker: `kind=mulligan` with the keep/toss rows. Turn: `kind=turn`
-    with headline/why/steps. This step is part of answering, not an optional
-    extra; skipping it leaves a stale card on the overlay all game.
+   **This is the #1 failure mode** — real miss: said Time-Twisted Seer "draws 2
+   cards" when its text is "Spell Damage +2 while damaged". Minion-only spells
+   (Precursory Strike, Bash, Torch, Sanguine Depths) **cannot hit face**; never
+   count them as burn.
+3. **Spend your mana.** Don't advise ending turn with mana floating — including
+   the hero power (Armor Up, etc.) when it makes strategic sense. Real miss:
+   advised passing with 4 mana unspent.
+4. **A game is over when — and only when — the `== GAME OVER` marker prints.**
+   Never infer a win or loss from HP math. Real miss: an `== UPDATE` read
+   `opp 3→0` — that was ARMOR, not HP, and the coach announced a win while the
+   game continued (they healed to 30 next turn). If state looks contradictory,
+   say it is unclear rather than picking the flattering interpretation.
+5. **A screenshot beats the snapshot.** If a screenshot contradicts the
+   snapshot's HP or board, the screenshot is ground truth.
+6. **Publish to the overlay in the same tool batch as the chat advice** (when
+   the overlay is running — payload shapes in the overlay publishing section).
+   Mulligan marker: `kind=mulligan` with the keep/toss rows. Turn: `kind=turn`
+   with headline/why/steps. This step is part of answering, not an optional
+   extra; skipping it leaves a stale card on the overlay all game.
+
+### The checks — run only the ones the marker listed
+
+Each heading is a check name as it appears in `checks live`.
+
+**`lethal`** — you may have lethal on board.
+Your board attack + weapon + burn from hand vs their `hp + armor`. The marker's
+detail line gives a **generous ceiling** (it counts exhausted minions and every
+"Deal N damage" in hand) — it is a trigger to do the math, never the math
+itself. Minion-only spells are not burn. Check the `taunt` entry before totaling
+any face damage. Weapon counter-damage can put you in lethal range yourself —
+count the counter-hit before advising a swing into a big minion.
+
+**`survival`** — their next full swing may kill you.
+
+Sum the opponent board's attack (**windfury attacks TWICE**; add their weapon)
+against your `hp + armor`. **Exhausted minions WILL attack next turn** —
+"exhausted" means "can't act *this* turn", not "defused". This cost a race: a
+14/8 exhausted minion was treated as safe and attacked for 28 over two turns.
+If you'd die to a full swing, survival outranks everything else this turn.
+
+**`taunt`** — the marker names every taunt on their board. Use its list.
+
+Taunt must be attacked first (spells ignore it). **The marker has already
+enumerated them — do not re-derive the list from memory, and do not treat "the
+taunt minion" as singular.** Two simultaneous taunts need two attackers spent on
+them, not one. Real miss: the opponent had Stonehill Defender AND a Voidwalker
+up at once; the plan cleared only Stonehill and counted the Voidwalker's blocked
+attacker as face damage, so the declared lethal was never legal.
+
+**Before killing a taunt "to open lethal", read that minion's OWN deathrattle.**
+Real miss: Death Strike on Broll, Blood Fighter to clear its taunt — but Broll's
+text is "Taunt. Deathrattle: Summon a Blood Fighter from your hand. Give it
++5/+5 and Taunt." Killing it immediately resummoned a *bigger* taunt blocker and
+voided the race.
+
+**`flags`** — the marker lists which minions carry which flags.
+
+`divine shield` absorbs one hit — pop it with the cheapest ping before real
+removal. `poisonous` destroys any minion it damages — never chump-block it with
+a big body. `reborn` dies TWICE (comes back at 1 HP) — never write "dies" in a
+plan against a reborn minion without budgeting the second kill; a two-card
+removal plan on Whelp of the Infinite left its Reborn copy standing. `immune`
+and `untargetable` (dormant) cannot be selected at all — skip them in plans
+until they wake. `lifesteal`, `rush`, `frozen`, `stealth` as usual. (`damaged`
+marks legal targets for damaged-only effects; `exhausted` is not listed as a
+flag hit because every freshly played minion has it — see `survival`.)
+
+**`hero-attack`** — your hero can swing this turn.
+
+Weapon, or a temp buff like "+3 Attack this turn" (those expire at end of turn).
+**Always say explicitly where the swing goes**: face when racing, into a minion
+when stabilizing — mind the counterattack damage. Never let a temp attack buff
+expire unused without stating why. If a spell grants attack, sequence it: cast
+the spell first, then swing.
+
+**`coin`** — The Coin is in hand.
+
+The Coin is a card, not a ritual. Only recommend it when the extra mana converts
+into a play that otherwise wouldn't fit this turn. Coin into a 1-drop while mana
+floats just burns it (real miss: turn 1, Coin + 1-cost minion with a native mana
+already available — the Coin added nothing).
+
+**`deathrattle`** — a deathrattle minion is on one of the boards.
+
+Eggs and token-spawners usually *want* to die; don't recommend popping them
+without a reason. Popping a Twilight Egg "to clear the board" hatched five 5/4s.
+Twice. If the opponent's minion text mentions a deathrattle payoff, factor it
+into the trade.
+
+**`random-splash`** — a random-damage effect is available to you.
+
+**Random-splash effects go last, or the plan is fiction.** A card whose text
+deals damage to a *random* target ("randomly split", "random enemy" — Erupting
+Volcano, Lotus Troublemaker) can kill your intended target before a later
+numbered step reaches it. Real miss: "cast Volcano, then finish [target] with a
+direct-damage spell" — Volcano's splash had already killed the target, leaving
+step 2 with no legal target. Sequence deterministic, targeted removal FIRST; put
+random-splash cards last, and say plainly that the target is not guaranteed.
+(Note Erupting Volcano is a LOCATION with a fire-spell kicker, not a one-shot
+AoE spell — it fires this check from the board, not just from hand.)
+
+**`aoe`** — board-wide damage is available to you.
+
+Read every minion's HP before advising it. AoE hits **your** minions too, and it
+can kill one of **theirs** that you were counting on trading into. The marker
+names their low-HP minions when it fires. Real miss: advised Searing Fissure
+(1 damage to all) without noticing their own Vendor sat at 2/1 — the AoE would
+have killed it for them.
+
+### Cheap context, worth a glance on any non-TRIVIAL turn
+
+- **`deck_cards_left`** before advising a race: "N of your M remaining cards
+  deal face damage" is the difference between a real race and a prayer.
+- **`opp.played`** before advising around removal: if their board clears are
+  spent, commit to the board; if not, hold something back.
 
 ## Output format (strict — the user is on the game's turn timer)
 
+- **TRIVIAL turns: ≤2 sentences.** Name the play, end turn. No why-paragraph, no
+  numbered list, no arithmetic. "Play Petal Peddler on curve and end turn —
+  nothing on their board to answer yet." That is a complete, correct answer;
+  padding it out is the failure mode, not the safe option.
 - ONE short paragraph of why (threat math, race state). Then a NUMBERED list of
   the exact moves in execution order, one action per line, targets named,
   triggers noted inline ("→ draw"). Warnings are a single bold line.
@@ -361,73 +473,28 @@ Work through this checklist before writing anything:
 - Game over: a short honest post-mortem is welcome — what decided the game,
   what to do differently. This is the only time longer analysis is appropriate.
 
-## Known traps (each of these happened in real coached games)
+## Marker mechanics
 
-- **Exhausted minions WILL attack next turn.** "Exhausted" means "can't act this turn",
-  not "locked down forever". On turn N, an exhausted minion resets and attacks freely
-  on turn N+1 (and can even attack multiple times if special mechanics apply). When
-  counting incoming damage next turn, treat exhausted minions as full threats, not
-  defused ones. This cost a race: I assumed a 14/8 exhausted minion was safe, but it
-  attacked twice for 28 damage.
-- **Discover and deathrattle mechanics now surface mid-turn.** Discovers fire a
-  `== DISCOVER PENDING` marker (Tier 2, best-effort) showing offered options before you
-  click, if the poll lands in that window. Multiple simultaneous discovers each fire their
-  own line. More reliably, discovered/summoned cards appear in an `== UPDATE` marker within
-  one poll interval after they land in your hand or board (Tier 1, always fires). Deathrattle
-  results (shuffled cards, summoned tokens) also show up in `== UPDATE` within the next poll.
-  Cards shuffled *into the deck* now appear in `deck_extra` in your snapshot (shown as
-  "generated/shuffled" extras beyond your original decklist count).
-- Advising "play Slam" as if it were a minion — it is a targeted spell and the
-  game rejects it with no board. Type/text fields exist so this never recurs.
-- Treating Erupting Volcano as a one-shot AoE spell — it is a LOCATION with a
-  fire-spell kicker.
-- Forgetting windfury doubles attack when counting incoming damage.
-- Recommending a weapon swing into a big minion when the counter-damage put the
-  player into exactly-lethal range. Count the counter-hit.
-- Popping a Twilight Egg "to clear the board" — it hatched into five 5/4s. Twice.
-- **Declaring victory off an unlabeled delta.** An `== UPDATE` line once read
-  `opp 3→0` — that was ARMOR reaching 0, not HP, and the coach announced
-  "GAME OVER: WON" while the game kept going (the opponent healed to 30 the
-  next turn). Deltas are labeled now (`opp armor 3→0`), but the rule stands
-  regardless: **a game is over when — and only when — the `== GAME OVER`
-  marker prints.** Never infer a win or loss from HP math, and never tell the
-  user the game ended without that marker. If state looks contradictory
-  (opponent "dead" but events keep flowing), say the state is unclear rather
-  than picking the flattering interpretation.
-- The mulligan marker now carries the dealt cards on the header line itself
+The game-rule traps that used to live here are now **checks** — each one fires
+from the board that caused it, so you read it only when it applies. What's left
+is how the feed itself behaves.
+
+- **Discover and deathrattle surface mid-turn.** Discovers fire a
+  `== DISCOVER PENDING` marker (Tier 2, best-effort) showing offered options
+  before you click, if the poll lands in that window. Multiple simultaneous
+  discovers each fire their own line. More reliably, discovered/summoned cards
+  appear in an `== UPDATE` marker within one poll interval after they land in
+  your hand or board (Tier 1, always fires). Deathrattle results (shuffled
+  cards, summoned tokens) also show up in `== UPDATE` within the next poll.
+  Cards shuffled *into the deck* appear in `deck_extra` in your snapshot (shown
+  as "generated/shuffled" extras beyond your original decklist count).
+- **`== UPDATE` deltas are labeled** (`opp armor 3→0`, not `opp 3→0`). An
+  unlabeled delta once caused a false "GAME OVER: WON" call — see the
+  always-on rule about the `== GAME OVER` marker.
+- **The mulligan marker carries the dealt cards on the header line itself**
   (`== MULLIGAN — 5 card(s) dealt vs WARLOCK: Slam(1), ...`). If a mulligan
-  header ever arrives without cards, ask for a screenshot rather than
-  advising blind.
-- **Advising on card text from memory, not from the card.** Real miss: said
-  Time-Twisted Seer "draws 2 cards" when its actual text is "Spell Damage +2
-  while damaged" — zero draw. **Always read card text from the snapshot or
-  screenshot before advising.** This is the #1 failure mode. Don't assume you
-  know what a card does.
-- **Killing a taunt minion "to clear the taunt" without checking whether ITS
-  OWN deathrattle re-creates one.** Real miss (2026-07-13): advised Death
-  Strike on Broll, Blood Fighter specifically to remove its taunt and open a
-  lethal swing — but Broll's own text reads "Taunt Deathrattle: Summon a
-  Blood Fighter from your hand. Give it +5/+5 and Taunt." Killing it
-  immediately resummoned a bigger taunt blocker, voiding the whole race plan.
-  Rule 9 (deathrattle caution) says to factor deathrattle payoffs into
-  trades — this is the specific trap where the payoff is a NEW taunt body:
-  before recommending "kill X to remove the taunt blocker," read X's own
-  deathrattle text and confirm it doesn't hand the opponent another one.
-- **Advising AoE/damage-to-all without checking minion HP.** Advised Searing
-  Fissure (1 damage to all minions) without noticing their own Vendor was at
-  2/1 (1 HP left) — the AoE would kill their own minion. **Read minion HP and
-  damage flags before advising any "damage to all" or board-wipe effect.**
-- **Leaving mana unspent without advising efficient use.** Advised passing with
-  4 mana floating. Should have advised: **use all available mana efficiently,
-  including hero power** (Armor Up for Warrior, etc.) when it makes strategic
-  sense. Don't leave resources on the table.
-- **Advising minion-only cards as face damage.** Spells like Precursory Strike
-  (3 damage to a minion), Bash (minion-only), Torch (1 damage to a damaged
-  minion), and Sanguine Depths (1 damage to a minion + buff) cannot hit face.
-  Always verify card text in the snapshot's rules text or a screenshot before
-  suggesting targeting. Don't assume "burn" spells go to face — read the text.
-- **Trusting snapshot diffs over live board state.** When a screenshot
-  contradicts the snapshot's HP numbers or board state, the screenshot is
-  ground truth — the live board is what matters. If state looks off, ask for
-  a fresh screenshot or read live.json directly instead of inferring from
-  diffs alone.
+  header ever arrives without cards, ask for a screenshot rather than advising
+  blind.
+- **`checks live` is absent on opponent turns and on mulligan** — it is
+  computed only for your-turn snapshots. Mulligan advice is not gated; give it
+  in full.
