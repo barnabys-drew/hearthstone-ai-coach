@@ -187,8 +187,21 @@ class GameActionsTests(unittest.TestCase):
 
 class SelftestTests(unittest.TestCase):
     def test_all_checks_run_without_fail_status(self) -> None:
+        """Every check's code path, in a sandbox: the overlay folder and the
+        telemetry log point at temp dirs. Without that, this unit test read
+        (and probe-wrote) the developer's real overlay folder, and failed
+        whenever its lessons mirror was stale. That is a deployment finding
+        for `hst selftest` to report, not a code bug for the suite to fail on."""
+        import os
+        import tempfile
+        from unittest import mock
+
         from hstracker.selftest import format_results, run_checks
-        results = run_checks()
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {
+            "HS_OVERLAY_DIR": str(Path(tmp) / "overlay"),
+            "HS_RAG_LOG": str(Path(tmp) / "retrieval_log.jsonl"),
+        }):
+            results = run_checks()
         fails = [r for r in results if r["status"] == "FAIL"]
         self.assertEqual(fails, [], f"selftest FAILs: {fails}")
         text = format_results(results)
