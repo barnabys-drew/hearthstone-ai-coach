@@ -637,10 +637,46 @@ def cmd_coach_report(args) -> int:
         print("## Override wins — lesson nominations (user beat the coach)")
         print(stats_mod.format_table(report["nominations"]))
         print()
+    _print_choices_readouts(events, session, stats_mod)
     if report["unjoined_advice"]:
         print(f"({report['unjoined_advice']} advice events outside any game's "
               f"join window)")
     return 0
+
+
+def _print_choices_readouts(events, session, stats_mod) -> None:
+    """#20 / #19: mulligans (coach vs Jev vs what you kept, from games.db) and
+    Discovers (vs what you picked, from the session's Power.log)."""
+    from .choicesreport import discover_readout, mulligan_readout, session_discovers
+    from .db import connect
+    from .raglog import join_games
+
+    games = join_games(events)
+    resolver = HeroClassResolver(allow_fetch=False)
+    try:
+        conn = connect(resolve_db_path(None))
+    except Exception:
+        conn = None
+    if conn is not None:
+        mull = mulligan_readout(games, conn, resolver.name)
+        conn.close()
+        if mull["games"]:
+            print("## Mulligans: coach vs Jev vs what you kept  (per card; agreement, not correctness)")
+            print(stats_mod.format_table(mull["games"]))
+            print()
+            print(stats_mod.format_table(mull["summary"]))
+            print()
+    if session is None:
+        if any(ev.get("kind") == "discover" for ev in events if ev.get("ev") == "advice"):
+            print("(Discover picks are scored with --session <dir>: the pick comes from its Power.log)")
+        return
+    disc = discover_readout(games, session_discovers(session, resolver), session.name)
+    if disc["picks"]:
+        print("## Discovers: advised pick vs what you picked")
+        print(stats_mod.format_table(disc["picks"]))
+        print()
+        print(stats_mod.format_table(disc["summary"]))
+        print()
 
 
 def cmd_selftest(args) -> int:

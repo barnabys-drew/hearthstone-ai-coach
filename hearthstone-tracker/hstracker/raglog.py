@@ -217,6 +217,7 @@ def join_games(events: list[dict[str, Any]]) -> dict[tuple, dict[str, Any]]:
             "t2_ran_turns": set(), "t2_fired_turns": set(),
             "tier_fired": {"t0": set(), "t1": set(), "t2": set()},
             "advice_events": [], "advice_feedback": [],
+            "start_time": None,
         })
 
     for ev in events:
@@ -244,6 +245,7 @@ def join_games(events: list[dict[str, Any]]) -> dict[tuple, dict[str, Any]]:
             g["opp_class"] = ev.get("opp_class")
             g["turns"] = ev.get("turns")
             g["outcome_ts"] = ev.get("ts")
+            g["start_time"] = ev.get("start_time")  # games.db key, for mulligan keeps
 
     outcomes = sorted(
         ((g["outcome_ts"], key) for key, g in games.items() if g["outcome_ts"]),

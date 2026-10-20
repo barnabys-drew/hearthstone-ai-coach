@@ -220,10 +220,14 @@ silently, and every number on this page would stop describing what runs.
   Jev, Sonnet 5.5 and Haiku 5.5 against each other.
 - **Agreement isn't correctness**, as above.
 - **Discover picks aren't measured yet.** They use the same `noul` design,
-  and every live pick is logged with its probabilities so it can be scored
-  against what I actually picked and how the game went. Until that data
-  exists, the Discover pick is a reasoned extension of the mulligan result,
-  not a measured one.
+  and every live pick is logged with its probabilities. `hst coach-report
+  --session <dir>` scores them against what I actually picked (from that
+  session's Power.log) and how the game went. Until enough sessions exist,
+  the Discover pick is a reasoned extension of the mulligan result, not a
+  measured one.
+- **The live comparison is built and waiting on games.** In Both mode,
+  `hst coach-report` prints a per-game mulligan table (coach vs Jev vs what
+  I kept, from `games.db`). It's the live version of the offline experiment.
 - **Turn plans stay with a generative model.** Nothing here suggests Jev can
   write one, and its docs say it shouldn't try.
 
