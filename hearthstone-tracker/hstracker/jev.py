@@ -21,8 +21,9 @@ dealt, and the coach model is free for the turn plans.
 Every call runs on a background thread. The live loop never waits on the
 network, and a missing key or a failed call changes nothing about tracking,
 the overlay panels or game recording: the feed prints one `!!` line and the
-coach model handles that decision as it always did. Opt in with `HS_JEV=1`
-plus `TYPESAFE_API_KEY`.
+coach model handles that decision as it always did. Which model answers is
+picked in the overlay (`hstracker/choices.py`: jev, coach, both, off); the
+Jev modes need `TYPESAFE_API_KEY`.
 
 Prompt design follows Jev 1.13's published weak spots: each decision is a
 `noul` (yes/no probability) question rather than a `choice`, because Jev
@@ -51,8 +52,8 @@ _FORMATS = {"FT_WILD": "Wild", "FT_STANDARD": "Standard", 1: "Wild", 2: "Standar
             3: "Classic", 4: "Twist"}
 
 
-def jev_enabled() -> bool:
-    return os.environ.get("HS_JEV") == "1" and bool(os.environ.get("TYPESAFE_API_KEY"))
+def jev_available() -> bool:
+    return bool(os.environ.get("TYPESAFE_API_KEY"))
 
 
 def cost_usd(input_tokens: int) -> float:
@@ -279,23 +280,27 @@ def _pct(p: float) -> str:
 class JevAdvisor:
     """Answers mulligans and Discovers off the live loop's thread.
 
-    Each answer is published to the overlay, logged as an `advice` event
-    (model = the pinned Jev version, variant "jev"), and queued as one feed
-    line (`== JEV MULLIGAN` / `== JEV DISCOVER`) that the live loop prints, so
-    the coach model sees the decision was made and doesn't redo it.
+    Each answer is written to `jev.json`, logged as an `advice` event (model =
+    the pinned Jev version, variant "jev", plus the choices mode), and queued
+    as one feed line (`== JEV MULLIGAN` / `== JEV DISCOVER`) that the live loop
+    prints. With `publish=True` (mode `jev`) it is also the main overlay card
+    and the coach doesn't redo it; with `publish=False` (mode `both`) it stays
+    a second opinion beside the coach's card.
     """
 
     def __init__(self, client: JevClient, overlay_dir: Any = None, *,
                  publish_advice: Callable | None = None,
                  publish_discover: Callable | None = None,
+                 publish_jev: Callable | None = None,
                  log_event: Callable | None = None,
                  background: bool = True) -> None:
-        from .overlay import write_advice, write_discover
+        from .overlay import write_advice, write_discover, write_jev
         from .raglog import append_event
 
         self.client, self.overlay_dir = client, overlay_dir
         self._publish_advice = publish_advice or write_advice
         self._publish_discover = publish_discover or write_discover
+        self._publish_jev = publish_jev or write_jev
         self._log = log_event or append_event
         self._background = background
         self.lines: queue.Queue[str] = queue.Queue()
@@ -316,11 +321,18 @@ class JevAdvisor:
 
     # mulligan -------------------------------------------------------------
 
-    def mulligan(self, hand: dict[str, Any], *, session: str | None = None,
-                 game_no: int | None = None) -> None:
-        self._spawn(lambda: self._mulligan(hand, session, game_no))
+    def _write(self, fn: Callable, *args: Any) -> None:
+        try:
+            fn(*args, self.overlay_dir)
+        except Exception:
+            pass  # overlay folder unavailable: the feed line still carries the answer
 
-    def _mulligan(self, hand: dict[str, Any], session: str | None, game_no: int | None) -> None:
+    def mulligan(self, hand: dict[str, Any], *, publish: bool = True, mode: str = "jev",
+                 session: str | None = None, game_no: int | None = None) -> None:
+        self._spawn(lambda: self._mulligan(hand, publish, mode, session, game_no))
+
+    def _mulligan(self, hand: dict[str, Any], publish: bool, mode: str,
+                  session: str | None, game_no: int | None) -> None:
         t0 = time.monotonic()
         try:
             resp = self.client.ask(mulligan_state(hand), mulligan_questions(hand["offered"]))
@@ -339,26 +351,29 @@ class JevAdvisor:
         tokens = int((resp.get("usage") or {}).get("input_tokens", 0))
         payload = {"kind": "mulligan", "turn": 0, "headline": "Mulligan (Jev)",
                    "mulligan": rows, "model": model, "variant": "jev"}
-        try:
-            self._publish_advice(payload, self.overlay_dir)
-        except Exception:
-            pass  # overlay folder unavailable: the feed line still carries the answer
+        self._write(self._publish_jev, {**payload, "session": session, "game_no": game_no})
+        if publish:
+            self._write(self._publish_advice, payload)
         self._log({"ev": "advice", "kind": "mulligan", "turn": 0,
-                   "mulligan_cards": [r["card"] for r in rows], "steps": [],
-                   "model": model, "variant": "jev", "session": session, "game_no": game_no,
+                   "mulligan_cards": [r["card"] for r in rows],
+                   "mulligan_keep": [r["keep"] for r in rows], "steps": [],
+                   "model": model, "variant": "jev", "choices_mode": mode,
+                   "session": session, "game_no": game_no,
                    "jev": {"probs": [round(p, 3) for p in probs], "latency_s": round(latency, 2),
                            "input_tokens": tokens, "cost_usd": round(cost_usd(tokens), 7)}})
-        self.lines.put(f"== JEV MULLIGAN ({latency:.1f}s) — keep: {', '.join(keep) or 'none'}"
+        tag = "" if publish else "second opinion, "
+        self.lines.put(f"== JEV MULLIGAN ({tag}{latency:.1f}s) — keep: {', '.join(keep) or 'none'}"
                        f" | toss: {', '.join(toss) or 'none'}")
 
     # discover -------------------------------------------------------------
 
     def discover(self, snap: dict[str, Any], discover: dict[str, Any], *,
+                 publish: bool = True, mode: str = "jev",
                  session: str | None = None, game_no: int | None = None) -> None:
-        self._spawn(lambda: self._discover(snap, discover, session, game_no))
+        self._spawn(lambda: self._discover(snap, discover, publish, mode, session, game_no))
 
-    def _discover(self, snap: dict[str, Any], discover: dict[str, Any],
-                  session: str | None, game_no: int | None) -> None:
+    def _discover(self, snap: dict[str, Any], discover: dict[str, Any], publish: bool,
+                  mode: str, session: str | None, game_no: int | None) -> None:
         options = discover.get("options") or []
         if len(options) < 2:
             return
@@ -376,21 +391,24 @@ class JevAdvisor:
         text = f"Pick {best} — Jev {_pct(best_p)} (vs {others})"
         model = resp.get("model") or self.client.model
         tokens = int((resp.get("usage") or {}).get("input_tokens", 0))
-        try:
-            self._publish_discover(text, self.overlay_dir)
-        except Exception:
-            pass
+        self._write(self._publish_jev, {"kind": "discover", "turn": snap.get("turn"),
+                                        "discover": text, "model": model,
+                                        "session": session, "game_no": game_no})
+        if publish:
+            self._write(self._publish_discover, text)
         self._log({"ev": "advice", "kind": "discover", "turn": snap.get("turn"),
                    "discover": text, "steps": [], "model": model, "variant": "jev",
-                   "session": session, "game_no": game_no,
+                   "choices_mode": mode, "session": session, "game_no": game_no,
                    "jev": {"options": [o.get("name") for o in options],
                            "probs": [round(p, 3) for p in probs], "latency_s": round(latency, 2),
                            "input_tokens": tokens, "cost_usd": round(cost_usd(tokens), 7)}})
-        self.lines.put(f"== JEV DISCOVER ({latency:.1f}s) — {discover.get('source')}: {text}")
+        tag = "" if publish else "second opinion, "
+        self.lines.put(f"== JEV DISCOVER ({tag}{latency:.1f}s) — {discover.get('source')}: {text}")
 
 
 def advisor_from_env(overlay_dir: Any = None) -> JevAdvisor | None:
-    """The live loop's advisor, or None when Jev isn't opted in."""
-    if not jev_enabled():
+    """The live loop's advisor, or None without a Jev key (the overlay's
+    picker then has only the coach and off modes to work with)."""
+    if not jev_available():
         return None
     return JevAdvisor(JevClient(os.environ["TYPESAFE_API_KEY"]), overlay_dir)

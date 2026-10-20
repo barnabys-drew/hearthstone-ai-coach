@@ -41,7 +41,7 @@
     "controls": {
       "x": 48,
       "y": 48,
-      "width": 90,
+      "width": 160,
       "height": 36,
       "visible": true
     }
@@ -56,6 +56,7 @@
     "toggleDeck": "CommandOrControl+Shift+2",
     "toggleOpponent": "CommandOrControl+Shift+3",
     "toggleLessons": "CommandOrControl+Shift+4",
-    "toggleStats": "CommandOrControl+Shift+5"
+    "toggleStats": "CommandOrControl+Shift+5",
+    "cycleChoices": "CommandOrControl+Shift+J"
   }
 }

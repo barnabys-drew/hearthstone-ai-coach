@@ -150,3 +150,36 @@ test('mergeConfig deep-merges panels and hotkeys over defaults', () => {
   assert.equal(cfg.hotkeys.toggleClickThrough, 'A', 'new hotkeys survive old configs');
   assert.equal(mergeConfig(defaults, null, ['advice', 'deck']).opacity, 0.9, 'null saved = defaults');
 });
+
+const { CHOICES_MODES, choicesMode, nextChoicesMode, choicesLabel, secondOpinion } = require('../renderer/logic.js');
+
+test('choices picker: cycle order, labels, invalid settings fall back to the tracker default', () => {
+  assert.deepEqual(CHOICES_MODES, ['jev', 'coach', 'both', 'off']);
+  assert.equal(nextChoicesMode('jev'), 'coach');
+  assert.equal(nextChoicesMode('off'), 'jev', 'wraps around');
+  assert.equal(nextChoicesMode(null), 'jev', 'unset starts the cycle');
+  assert.equal(choicesMode({ choices: 'both' }), 'both');
+  assert.equal(choicesMode({ choices: 'sonnet' }), null);
+  assert.equal(choicesMode(null), null);
+  assert.equal(choicesLabel(null), 'Default');
+  assert.equal(choicesLabel('jev'), 'Jev');
+});
+
+test('secondOpinion: Jev beside the coach, never duplicating or outliving the decision', () => {
+  const jevMull = { kind: 'mulligan', ts: 1000, mulligan: [
+    { card: 'Slam', keep: true, reason: 'Jev: 72% keep' },
+    { card: 'For Glory!', keep: false, reason: 'Jev: 22% keep' },
+  ] };
+  const coachMull = { kind: 'mulligan', model: 'haiku-5-5', ts: 1010 };
+  assert.equal(secondOpinion(coachMull, jevMull, 1020), 'Jev: keep Slam 72% · toss For Glory! 22%');
+  assert.equal(secondOpinion({ kind: 'mulligan', model: 'jev-1.13.0', ts: 1000 }, jevMull, 1020), null,
+    'Jev already is the main card');
+  assert.equal(secondOpinion({ kind: 'gameover', ts: 900 }, jevMull, 1020) !== null, true,
+    'shows over last game\'s card until the coach answers');
+  assert.equal(secondOpinion({ kind: 'turn', ts: 1100 }, jevMull, 1120), null, 'a newer turn card hides it');
+  assert.equal(secondOpinion(coachMull, jevMull, 1000 + 181), null, 'stale after 3 minutes');
+  assert.equal(secondOpinion(coachMull, null, 1020), null);
+  const jevDisc = { kind: 'discover', ts: 2000, turn: 5, discover: 'Pick B — Jev 70%' };
+  assert.equal(secondOpinion({ kind: 'turn', turn: 5, model: 'haiku-5-5', ts: 2001 }, jevDisc, 2010), 'Jev: Pick B — Jev 70%');
+  assert.equal(secondOpinion({ kind: 'turn', turn: 6, ts: 2050 }, jevDisc, 2060), null, 'next turn hides it');
+});

@@ -359,7 +359,8 @@ can be replayed offline against any model (`lab/mulligan-ab/`).
 - **The rest:** Jev was the most consistent arm (96% identical across
   repeats), 0.2s per answer, about 1/100 of Sonnet 5's cost.
 - **Decision:** mulligans and Discovers route to Jev inside the tracker
-  (`hstracker/jev.py`, `HS_JEV=1`). Turn plans stay with a generative model.
+  (`hstracker/jev.py`), switchable from the overlay. Its Both mode runs the
+  live version of this A/B. Turn plans stay with a generative model.
 - **Logging:** every Jev answer is an `advice` event with
   `model: jev-1.13.0`, `variant: jev` and its probabilities, so the 6b/6c
   machinery scores it like any other advice. Full write-up: [jev.md](jev.md).

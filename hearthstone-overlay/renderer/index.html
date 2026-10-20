@@ -18,12 +18,13 @@
       </div>
       <div id="lethal" class="lethal hidden"></div>
       <div id="discover" class="discover hidden"></div>
+      <div id="second-opinion" class="second-opinion hidden"></div>
       <p id="why" class="why">Start <code>hst live</code> and publish advice to populate this panel.</p>
       <ol id="steps" class="steps"></ol>
       <div id="mulligan" class="mulligan hidden"></div>
       <div id="warning" class="warning hidden"></div>
       <div id="stale" class="stale hidden">Advice may be stale — waiting for current-turn instructions.</div>
-      <footer><span id="data-path">loading…</span><span class="overlay-state">click-through</span></footer>
+      <footer><span id="data-path">loading…</span><button id="choices-toggle" class="choices-toggle" title="Who answers mulligans and Discovers (click to change; Ctrl+Shift+J in the app)">choices: —</button><span class="overlay-state">click-through</span></footer>
     </section>
 
     <aside class="tracker-card panel" id="panel-deck">
@@ -66,6 +67,7 @@
 
     <!-- Tiny always-clickable button bar (Electron only; hidden in browser mode). -->
     <aside class="controls-card panel" id="panel-controls">
+      <button id="btn-choices" class="ctl choices" title="Who answers mulligans and Discovers: Jev / Coach / Both / Off (Ctrl+Shift+J)">—</button>
       <button id="btn-move" class="ctl" title="Move / lock panels (Ctrl+Shift+F)">&#x2725;</button>
       <button id="btn-quit" class="ctl quit" title="Quit overlay">&#x23FB;</button>
     </aside>

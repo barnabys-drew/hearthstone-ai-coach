@@ -84,8 +84,9 @@ Also in this repo:
   snapshot every turn: hand with card text, board with buffs, HP/armor/mana,
   remaining deck outs, opponent play history, and lethal math. An AI agent reads
   these snapshots and advises turn-by-turn, drawing from the actual game state
-  (not model memory). With `HS_JEV=1`, mulligans and Discovers are answered by
-  Jev from inside the tracker, before the agent has read the marker. Includes a rigorous checklist and traps from real-game
+  (not model memory). Who answers mulligans and Discovers (Jev, the coach,
+  both side by side, or nobody) is a button on the overlay; in Jev mode they
+  are answered from inside the tracker, before the agent has read the marker. Includes a rigorous checklist and traps from real-game
   validation. See its [architecture & checklist](hearthstone-live-coach/README.md).
 
 - **[`hearthstone-overlay`](hearthstone-overlay/README.md)** — a native
@@ -128,8 +129,9 @@ from `games.db` against seven arms, three repeats each
   with 64 hands.
 - **The rest:** Jev is the most consistent arm, about ten times faster, and
   about 1/100 of Sonnet 5's cost. A thousand mulligans cost 3.5 cents.
-- **So the tracker now asks Jev itself** (`HS_JEV=1`) and the chat model
-  keeps the turns.
+- **So the tracker now asks Jev itself** and the chat model keeps the
+  turns. Who answers is a button on the overlay: Jev, Coach, Both (Jev as a
+  live second opinion beside the coach), or Off.
 
 The full comparison is in [docs/jev.md](docs/jev.md): every arm, which
 differences are real, what Jev's deck-list sensitivity shows, and the limits.
@@ -140,7 +142,8 @@ The scores measure agreement with my keeps, not correctness.
 > a plain chat window — following the same SKILL.md playbook over the same
 > feed. See [docs/coach-with-any-model.md](docs/coach-with-any-model.md) for
 > per-agent setup. The only model API the tracker calls itself is Jev, for
-> mulligans and Discovers, and only with `HS_JEV=1` and a `TYPESAFE_API_KEY`.
+> mulligans and Discovers, and only with a `TYPESAFE_API_KEY` and the overlay's
+> choices picker on Jev or Both.
 > Without them the coach model answers those as well, and tracking, the
 > overlay and game recording never depend on either.
 
@@ -360,7 +363,8 @@ hearthstone-overlay/
 hearthstone-tracker/
   hst          # CLI launcher (backfill | watch | live | stats)
   hstracker/   # Power.log -> SQLite capture, live snapshots, stats, overlay bridge
-               #   jev.py: mulligan + Discover answers from Jev (HS_JEV=1)
+               #   jev.py: mulligan + Discover answers from Jev
+               #   choices.py: who answers them (overlay picker: jev|coach|both|off)
   coach_publish.py  # publish coach advice/discover picks/lessons to the overlay
   requirements.txt
 

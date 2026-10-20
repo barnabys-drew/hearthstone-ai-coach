@@ -190,11 +190,15 @@ def check_renderer_logic() -> CheckResult:
     test) — the renderer logic is part of the running system too."""
     import subprocess
 
-    test_dir = Path(__file__).resolve().parents[2] / "hearthstone-overlay" / "test"
+    overlay_dir = Path(__file__).resolve().parents[2] / "hearthstone-overlay"
+    test_dir = overlay_dir / "test"
     if not test_dir.is_dir():
         return _result("renderer logic", "WARN", f"no test dir at {test_dir}")
     try:
-        proc = subprocess.run(["node", "--test", str(test_dir)],
+        # Run from the overlay folder and let node discover test/*.test.mjs, as
+        # CI does. Node 22 treats `node --test <dir>` as a module path and
+        # fails without running anything, so this check had never passed.
+        proc = subprocess.run(["node", "--test"], cwd=overlay_dir,
                               capture_output=True, text=True, timeout=60)
     except FileNotFoundError:
         return _result("renderer logic", "WARN",
@@ -283,7 +287,9 @@ def check_store() -> CheckResult:
 def check_jev() -> CheckResult:
     """The Jev path end to end with a fake API: state, questions, parsing,
     overlay payload, telemetry event and feed line. No network, no spend."""
-    from .jev import MODEL, JevAdvisor, JevClient, jev_enabled
+    from .choices import effective_mode, read_mode
+    from .jev import MODEL, JevAdvisor, JevClient, jev_available
+    from .overlay import resolve_overlay_dir
 
     hand = {"format": 2, "game_label": None, "my_class": "WARRIOR", "opp_class": "MAGE",
             "going_first": True, "deck_name": None, "decklist": [],
@@ -291,20 +297,26 @@ def check_jev() -> CheckResult:
                         {"name": "For Glory!", "cost": 5, "type": "spell", "text": "Draw.", "copies": 1}]}
     fake = {"model": MODEL, "usage": {"input_tokens": 100},
             "answers": {"c0": {"noul": 0.8}, "c1": {"noul": 0.2}}}
-    published, logged = [], []
+    published, seconds, logged = [], [], []
     advisor = JevAdvisor(JevClient("selftest", post=lambda body: fake), None,
                          publish_advice=lambda payload, _d: published.append(payload),
+                         publish_jev=lambda payload, _d: seconds.append(payload),
                          log_event=logged.append, background=False)
-    advisor.mulligan(hand)
+    advisor.mulligan(hand)                                 # mode jev: main card
+    advisor.mulligan(hand, publish=False, mode="both")     # mode both: second opinion only
     lines = advisor.drain()
     rows = published[0]["mulligan"] if published else []
-    if [r["keep"] for r in rows] != [True, False] or not logged or not lines:
+    if ([r["keep"] for r in rows] != [True, False] or len(published) != 1
+            or len(seconds) != 2 or len(logged) != 2 or len(lines) != 2):
         return _result("jev (mulligan/discover)", "FAIL",
                        f"synthetic mulligan did not round-trip: rows={rows} lines={lines}")
-    if not jev_enabled():
+    picked = read_mode(resolve_overlay_dir(None))
+    mode = effective_mode(picked, jev_available())
+    if not jev_available():
         return _result("jev (mulligan/discover)", "WARN",
-                       "code path OK; off (set HS_JEV=1 + TYPESAFE_API_KEY) — the coach model handles them")
-    return _result("jev (mulligan/discover)", "PASS", f"on, {MODEL}; code path OK")
+                       f"code path OK; no TYPESAFE_API_KEY, so choices run as '{mode}'"
+                       + (f" (overlay picked '{picked}')" if picked != mode else ""))
+    return _result("jev (mulligan/discover)", "PASS", f"{MODEL}; choices mode '{mode}'; code path OK")
 
 
 ALL_CHECKS = [

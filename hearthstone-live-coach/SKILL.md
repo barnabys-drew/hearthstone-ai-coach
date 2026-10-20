@@ -83,8 +83,10 @@ same mistake doesn't repeat game after game.
    ```bash
    HS_JEV=1 HS_COACH_GATED=1 <repo>/hearthstone-tracker/coach_feed.sh
    ```
-   `HS_JEV=1` (with `TYPESAFE_API_KEY` exported) hands mulligans and Discovers
-   to Jev. Leave it off and you answer those too, exactly as before.
+   Who answers mulligans and Discovers is picked in the overlay (the choices
+   button: Jev / Coach / Both / Off). `HS_JEV=1` only sets the default for
+   when nothing has been picked yet; the Jev modes need `TYPESAFE_API_KEY`
+   exported. See "Mulligans and Discovers: follow the choices mode" below.
    It kills any zombie feed from previous sessions (detached children outlive
    their shell wrappers and TaskStop — a 2-day-old zombie once fed a whole
    session through a corrupt shared log), starts exactly ONE feed appending to
@@ -150,16 +152,33 @@ same mistake doesn't repeat game after game.
    override) adds card rules text and flags; read it only when you need those.
    When you do read it, always re-read fresh — it is rewritten continuously.
 
-## Mulligans and Discovers: Jev answers them (when the feed runs with `HS_JEV=1`)
+## Mulligans and Discovers: follow the choices mode
 
-The tracker asks Jev on its own thread the moment a hand is dealt or a
-Discover is offered, publishes the answer to the overlay, logs it, and prints
-one line to the feed:
+The player picks who answers these in the overlay, and can change it mid-
+session. Every decision line carries the mode in force, so read it there,
+never from memory:
+
+```
+== MULLIGAN [choices: jev] — 4 card(s) dealt vs MAGE: Slam(1), ...
+== DISCOVER PENDING [choices: both] — Tracking: ...
+== CHOICES MODE: both — you answer and publish as usual; Jev's answer shows beside yours ...
+```
+
+(`== CHOICES MODE` prints at startup and whenever the pick changes.) In the
+Jev modes the tracker asks Jev on its own thread the moment a hand is dealt
+or a Discover is offered, and prints one line:
 
 ```
 == JEV MULLIGAN (0.3s) — keep: Slam 81%, Rockskipper 68% | toss: For Glory! 22%
-== JEV DISCOVER (0.2s) — Tracking: Pick Bait and Switch — Jev 72% (vs ...)
+== JEV DISCOVER (second opinion, 0.2s) — Tracking: Pick Bait and Switch — Jev 72% (vs ...)
 ```
+
+| Mode on the line | What you do |
+|---|---|
+| `jev` | Wait for `== JEV ...`; it's already on the overlay. Don't publish. Relay it in one chat line. |
+| `both` | Answer and publish exactly as with `coach`. Jev's answer shows beside yours as a second opinion; don't mention it unless you disagree with it. |
+| `coach` | Answer and publish as usual. No Jev line will come. |
+| `off` | Don't advise. Say nothing about the mulligan or the Discover; the player is deciding alone on purpose. |
 
 Why Jev and not you: on 64 real opening hands it matched the player's keeps
 about as well as every Claude model tested, Sonnet 5 included (the gap is
@@ -168,7 +187,7 @@ inside the error bars), answered the same way 96% of the time, and took
 more expensive at a decision that is a classification, and your turn budget
 is better spent on the turns.
 
-So, with Jev on:
+In `jev` mode:
 
 - **On `== MULLIGAN`: do nothing yet.** The `== JEV MULLIGAN` line follows
   within a second or two. Do **not** publish a `kind=mulligan` card; Jev's is
@@ -186,8 +205,10 @@ So, with Jev on:
   probabilities so they can be scored later; treat them as a strong default,
   not ground truth.
 
-With Jev off, ignore this section: the `== MULLIGAN` and `== DISCOVER
-PENDING` rules below apply as written.
+In `coach` and `both` modes the `== MULLIGAN` and `== DISCOVER PENDING`
+rules below apply as written. In `both`, keep your answer independent: decide
+before you read Jev's line, because the point of the mode is to compare two
+separate answers.
 
 ## Terminology: Always Use "End Turn" Not "Pass"
 
@@ -209,9 +230,9 @@ together); a failed publish must never delay the chat advice.
 shortest window** (real recurring failure: multiple sessions gave chat-only
 mulligan advice and the overlay sat on a stale card all game). On the
 `== MULLIGAN` marker, the `kind=mulligan` publish goes out with your keep/toss
-answer — before turn 1 advice, no exceptions. (With Jev on, the tracker makes
-that publish itself; you publish only if a `!! Jev ... failed` line says it
-couldn't.)
+answer — before turn 1 advice, no exceptions. (In `jev` mode the tracker
+makes that publish itself; you publish only if a `!! Jev ... failed` line says
+it couldn't. In `off` mode nobody publishes one.)
 
 Use `../hearthstone-tracker/coach_publish.py` (or the absolute repo path) and
 keep the payload short enough to scan while playing.
@@ -512,7 +533,7 @@ have killed it for them.
   attacks BEFORE spells, so burn can be re-aimed if a deathrattle or hidden
   armor changes the math mid-sequence. If it's near-lethal, state the exact
   shortfall instead.
-- Mulligan (`== MULLIGAN` marker, Jev off or failed): **bullet list** of keep/toss recommendations,
+- Mulligan (`== MULLIGAN` marker in `coach`/`both` mode, or Jev failed): **bullet list** of keep/toss recommendations,
   one card per line with a few words of reasoning. User scans it in seconds
   before locking in. In the SAME batch, publish it:
   `coach_publish.py --json '{"kind":"mulligan","turn":1,"mulligan":[{"card":"...","keep":true,"reason":"..."}]}'`

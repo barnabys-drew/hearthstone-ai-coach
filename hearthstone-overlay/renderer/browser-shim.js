@@ -11,6 +11,16 @@ if (!window.overlayAPI) {
     }),
     artPath: (cardId) => Promise.resolve(`/art/${encodeURIComponent(cardId)}.png`),
     setClickThrough: () => {},
+    // JSON content type on purpose: a cross-site page can't send it without a
+    // CORS preflight, which serve.py never answers.
+    setChoices: (mode) => fetch('/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ choices: mode }),
+    }).then((r) => {
+      if (!r.ok) throw new Error(`settings: HTTP ${r.status}`);
+      return mode;
+    }),
     quit: () => {}, // a browser tab cannot quit the overlay; the button is hidden anyway
     onState: (callback) => callback({ clickThrough: false, opacity: 1 }),
     onFileChanged: () => {}, // browser mode has no watcher; polling covers it

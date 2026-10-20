@@ -91,12 +91,40 @@ Defaults are configured in `config.json`:
 - `Ctrl+Shift+1/2/3/4/5` — toggle the advice / deck / opponent / lessons / stats panel
 - `Ctrl+Shift+-` / `Ctrl+Shift+=` — opacity down/up
 - `Ctrl+Shift+0` — reset all panel positions
+- `Ctrl+Shift+J` — cycle who answers mulligans and Discovers: Jev → Coach →
+  Both → Off (see below)
 
 The window starts click-through so it will not eat Hearthstone clicks. Toggle click-through off to move or resize it, then toggle it back on.
 
 No hotkeys handy? The tiny **controls** bar (top-left by default) is never
-click-through: ✥ toggles move/lock for all panels (same as `Ctrl+Shift+F`),
-⏻ quits the overlay entirely.
+click-through: the choices button cycles who answers mulligans and Discovers
+(same as `Ctrl+Shift+J`), ✥ toggles move/lock for all panels (same as
+`Ctrl+Shift+F`), ⏻ quits the overlay entirely.
+
+## Choosing who answers mulligans and Discovers
+
+| Mode | Who answers | On the advice panel |
+|---|---|---|
+| **Jev** | TypeSafe's Jev, from inside `hst live`, in ~0.2s | Jev's card (footer: `coach: jev-1.13.0`) |
+| **Coach** | your coaching model (Claude Code, Codex, ...) | the coach's card |
+| **Both** | both, independently | the coach's card plus a green **Jev:** second-opinion strip |
+| **Off** | nobody: you decide alone | nothing for these decisions |
+
+- **Where the pick lives:** it is saved to `settings.json` in the shared
+  overlay folder. `hst live` re-reads it on change, so a switch applies to
+  the next mulligan with no restart.
+- **Turn plans aren't affected:** they always come from the coaching
+  session's model, which the overlay shows but can't change.
+- **Both is the live A/B mode:** every game logs the coach's answer, Jev's
+  answer and the choices mode in the retrieval log, next to what you
+  actually kept.
+- **Jev needs a key:** Jev and Both need `TYPESAFE_API_KEY` where
+  `hst live` runs. Without it they fall back to Coach, and the feed says so.
+- **Before anything is picked:** the button shows *Default*, which is Jev
+  when `hst live` was started with `HS_JEV=1` and Coach otherwise.
+- **Browser mode:** the same picker is the **choices:** button in the advice
+  panel's footer. In the Electron app that footer label is display-only,
+  because the panel is click-through; use the controls bar or the hotkey.
 
 ## What the overlay shows — five standalone panels + a controls bar
 
@@ -118,7 +146,7 @@ draggable and resizable on all four edges in move mode:
    form pips, best/worst matchups by opponent class, and your overall record
    across all decks. Computed from `games.db` and written to
    `deck_stats.json` whenever a game finishes.
-6. **Controls** — a ~90×36 button bar that always accepts clicks (never
-   click-through): ✥ move/lock, ⏻ quit. Hidden in browser mode, where
+6. **Controls** — a ~160×36 button bar that always accepts clicks (never
+   click-through): the choices picker, ✥ move/lock, ⏻ quit. Hidden in browser mode, where
    neither action applies. It hides and shows with `Ctrl+Shift+9` like the
    rest, and its position is saved too.

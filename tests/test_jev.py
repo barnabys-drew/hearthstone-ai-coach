@@ -42,8 +42,11 @@ def mull_hand(*names):
             "going_first": True, "deck_name": None, "decklist": [], "offered": offered(*names)}
 
 
-def advisor(response=None, error=None):
+def advisor(response=None, error=None, seconds=None):
+    """An advisor whose every writer is stubbed: tests never touch the real
+    overlay folder or telemetry log (one once wrote a real jev.json)."""
     published, discovers, logged = [], [], []
+    seconds = [] if seconds is None else seconds
 
     def post(body):
         if error:
@@ -53,6 +56,7 @@ def advisor(response=None, error=None):
     a = jev.JevAdvisor(jev.JevClient("k", post=post), None,
                        publish_advice=lambda p, _d: published.append(p),
                        publish_discover=lambda t, _d: discovers.append(t),
+                       publish_jev=lambda p, _d: seconds.append(p),
                        log_event=logged.append, background=False)
     return a, published, discovers, logged
 
@@ -145,12 +149,33 @@ class AdvisorTests(unittest.TestCase):
         self.assertEqual({q["type"] for q in qs.values()}, {"noul"})
         self.assertEqual({q["type"] for q in jev.mulligan_questions(offered("A")).values()}, {"noul"})
 
-    def test_enabled_needs_both_flag_and_key(self):
+    def test_available_means_a_key(self):
         with mock.patch.dict("os.environ", {"HS_JEV": "1"}, clear=True):
-            self.assertFalse(jev.jev_enabled())
+            self.assertFalse(jev.jev_available())
             self.assertIsNone(jev.advisor_from_env())
-        with mock.patch.dict("os.environ", {"HS_JEV": "1", "TYPESAFE_API_KEY": "k"}, clear=True):
-            self.assertTrue(jev.jev_enabled())
+        with mock.patch.dict("os.environ", {"TYPESAFE_API_KEY": "k"}, clear=True):
+            self.assertTrue(jev.jev_available())
+
+    def test_both_mode_is_a_second_opinion_only(self):
+        resp = {"answers": {"c0": {"noul": 0.9}}}
+        seconds = []
+        a, published, _, logged = advisor(resp, seconds=seconds)
+        a.mulligan(mull_hand("Slam"), publish=False, mode="both")
+        self.assertEqual(published, [])  # the coach's card stays the main one
+        self.assertEqual(seconds[0]["mulligan"][0]["card"], "Slam")
+        self.assertEqual(logged[0]["choices_mode"], "both")
+        self.assertEqual(logged[0]["mulligan_keep"], [True])
+        self.assertIn("second opinion", a.drain()[0])
+
+    def test_discover_second_opinion_skips_main_card(self):
+        seconds = []
+        a, _, discovers, _ = advisor({"answers": {"o0": {"noul": 0.2}, "o1": {"noul": 0.6}}},
+                                     seconds=seconds)
+        snap = {"turn": 3, "me": {"hand": [], "board": []}, "opp": {"board": []}}
+        a.discover(snap, {"source": "X", "options": [{"name": "A"}, {"name": "B"}]},
+                   publish=False, mode="both")
+        self.assertEqual(discovers, [])
+        self.assertTrue(seconds[0]["discover"].startswith("Pick B"))
 
     def test_client_rejects_non_http_url(self):
         with self.assertRaises(ValueError):
@@ -186,12 +211,14 @@ class FeedFilterTests(unittest.TestCase):
     def test_jev_lines_reach_the_coach(self):
         feed = ("== TURN 2 [raw 3] (opponent's turn) — x\n"
                 "== JEV MULLIGAN (0.2s) — keep: Slam 81% | toss: none\n"
-                "== JEV DISCOVER (0.2s) — Tracking: Pick B\n")
+                "== JEV DISCOVER (0.2s) — Tracking: Pick B\n"
+                "== CHOICES MODE: both — you answer\n")
         out = subprocess.run(["awk", "-f", str(ROOT / "hearthstone-tracker" / "coach_filter.awk")],
                              input=feed, capture_output=True, text=True, check=True).stdout
         self.assertNotIn("TURN 2", out)
         self.assertIn("== JEV MULLIGAN", out)
         self.assertIn("== JEV DISCOVER", out)
+        self.assertIn("== CHOICES MODE: both", out)
 
 
 if __name__ == "__main__":

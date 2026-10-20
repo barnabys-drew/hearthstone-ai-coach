@@ -142,6 +142,8 @@ def _log_advice_event(payload: dict, args: argparse.Namespace) -> None:
     """Phase 6a: one `advice` event per publish, into the retrieval log.
     Best-effort — telemetry must never block the overlay write."""
     try:
+        from hstracker.choices import read_mode
+        from hstracker.overlay import resolve_overlay_dir
         from hstracker.raglog import append_event
         mull = payload.get("mulligan") or []
         append_event({
@@ -152,12 +154,16 @@ def _log_advice_event(payload: dict, args: argparse.Namespace) -> None:
             "headline": payload.get("headline"),
             "steps": payload.get("steps") or [],
             "mulligan_cards": [r.get("card") for r in mull if isinstance(r, dict)],
+            "mulligan_keep": [bool(r.get("keep")) for r in mull if isinstance(r, dict)],
             "warning_present": bool(payload.get("warning")),
             "discover": payload.get("discover"),
             "game_over": payload.get("game_over"),
             "applied_lessons": list(args.applied_lesson or []),
             "model": payload.get("model") or args.model,
             "variant": payload.get("variant") or args.variant,
+            # Who the overlay said answers choices when this was published:
+            # in `both` mode the coach's and Jev's answers pair up per game.
+            "choices_mode": read_mode(resolve_overlay_dir(args.overlay_dir)),
         })
     except Exception:
         pass

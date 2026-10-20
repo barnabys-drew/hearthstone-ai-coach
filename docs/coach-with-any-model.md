@@ -2,8 +2,9 @@
 
 Turn coaching is **model-agnostic by design**: no part of it imports a
 provider SDK or expects a specific model. The one model API the stack calls
-itself is TypeSafe's Jev, for mulligans and Discovers. It's opt-in
-(`HS_JEV=1`), runs inside the tracker, and is covered in [jev.md](jev.md).
+itself is TypeSafe's Jev, for mulligans and Discovers. It runs inside the
+tracker when the overlay's choices picker says Jev or Both, and is covered
+in [jev.md](jev.md).
 The pipeline is plain CLIs and files:
 
 ```
@@ -12,7 +13,7 @@ Hearthstone Power.log
       ▼
 hst live  ──►  live.json + turn markers ──►  coach_filter.awk
       │   │                                         │
-      │   └─► Jev (HS_JEV=1, background thread)     │
+      │   └─► Jev (picker: Jev/Both, bg thread)     │
       │       mulligan + Discover answers           │
       │       ─► overlay + "== JEV ..." feed line   │
       ▼                                             ▼

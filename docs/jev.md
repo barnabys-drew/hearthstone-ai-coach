@@ -160,10 +160,10 @@ it, and it's a strong one for a decision of this shape.
 
 ## How it runs in the coach
 
-`hearthstone-tracker/hstracker/jev.py`, enabled with `HS_JEV=1` plus
-`TYPESAFE_API_KEY`:
+`hearthstone-tracker/hstracker/jev.py`, needing `TYPESAFE_API_KEY`:
 
-1. `hst live` sees a mulligan-phase snapshot or a new pending Discover.
+1. `hst live` sees a mulligan-phase snapshot or a new pending Discover, and
+   checks the choices mode picked in the overlay (see below).
 2. It builds the short state (the tested text, word for word for ranked
    games) and asks Jev **on a background thread**. The live loop never waits
    on the network.
@@ -175,6 +175,31 @@ it, and it's a strong one for a decision of this shape.
    `hst coach-report` attributes it like any other advice.
 5. A `== JEV MULLIGAN` / `== JEV DISCOVER` line goes to the feed, so the turn
    coach knows the decision is made and doesn't redo it.
+
+### Picking who answers, from the overlay
+
+A button on the overlay's controls bar (or `Ctrl+Shift+J`, or the footer
+button in browser mode) cycles four modes. The pick is saved to
+`settings.json` in the shared overlay folder, and `hst live` re-reads it
+whenever it changes:
+
+| Mode | Mulligans and Discovers |
+|---|---|
+| **Jev** | Jev answers; its card is the main one; the coach waits |
+| **Coach** | the coaching model answers, as before Jev |
+| **Both** | both answer independently; the coach's card is the main one and Jev's shows as a green second-opinion strip |
+| **Off** | nobody advises; you decide alone |
+
+- **The mode travels with every decision:** each mulligan and Discover
+  marker carries `[choices: <mode>]`, so the coach reads its instructions
+  from the line it's answering.
+- **Telemetry:** every advice event, Jev's and the coach's, records the mode
+  and the keep/toss list.
+- **Both is the live A/B the offline experiment couldn't run:** each game
+  pairs the two answers with what was actually kept and whether the game was
+  won.
+- **Turn plans stay with the session's model.** The overlay can show that
+  model but not change it.
 
 **Failure is boring on purpose.** A missing key, a timeout or an HTTP error
 prints one `!! Jev ... failed` line, and the coach model answers that

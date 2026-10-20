@@ -22,10 +22,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "hearthstone-tracker"))
+from hstracker.choices import MODES as CHOICES_MODES  # noqa: E402
+from hstracker.choices import write_mode  # noqa: E402
 from hstracker.overlay import resolve_overlay_dir  # noqa: E402
 
 RENDERER_DIR = Path(__file__).resolve().parent / "renderer"
-DATA_FILES = {"live.json", "advice.json", "lessons.json", "lesson_store.json", "deck_stats.json"}
+DATA_FILES = {"live.json", "advice.json", "lessons.json", "lesson_store.json", "deck_stats.json",
+              "settings.json", "jev.json"}
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "[::1]", "")
+MAX_SETTINGS_BODY = 1024
 MIME = {".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".ttf": "font/ttf"}
 ART_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 ART_REMOTE = "https://art.hearthstonejson.com/v1/tiles/{card_id}.png"
@@ -40,8 +45,7 @@ class OverlayHandler(BaseHTTPRequestHandler):
         # Reject non-local Host headers: blocks DNS-rebinding pages from
         # reading game state, and keeps this safe-by-default if anyone ever
         # changes the bind address away from loopback.
-        host = (self.headers.get("Host") or "").split(":", 1)[0].lower()
-        if host not in ("localhost", "127.0.0.1", "[::1]", ""):
+        if not self._local_host():
             return self._send_error(403, "forbidden host")
         path = self.path.split("?", 1)[0]
         if path == "/config":
@@ -56,6 +60,44 @@ class OverlayHandler(BaseHTTPRequestHandler):
             self._send_art(path.removeprefix("/art/").removesuffix(".png"))
         else:
             self._send_static("index.html" if path == "/" else path.lstrip("/"))
+
+    def _local_host(self) -> bool:
+        host = (self.headers.get("Host") or "").split(":", 1)[0].lower()
+        return host in LOCAL_HOSTS
+
+    def do_POST(self) -> None:  # noqa: N802 (stdlib naming)
+        """The only write: the choices picker (POST /settings {"choices": mode}).
+
+        Locked down like the reads plus two CSRF guards: the Origin, when a
+        browser sends one, must be this page, and the body must be JSON, a
+        content type a cross-site page can't send without a CORS preflight,
+        which this server never answers."""
+        if not self._local_host():
+            return self._send_error(403, "forbidden host")
+        origin = self.headers.get("Origin")
+        if origin is not None:
+            origin_host = origin.split("://", 1)[-1].split(":", 1)[0].lower()
+            if origin_host not in LOCAL_HOSTS or origin == "null":
+                return self._send_error(403, "forbidden origin")
+        if self.path.split("?", 1)[0] != "/settings":
+            return self._send_error(404, "not found")
+        if (self.headers.get("Content-Type") or "").split(";", 1)[0].strip() != "application/json":
+            return self._send_error(415, "expected application/json")
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = -1
+        if not 0 < length <= MAX_SETTINGS_BODY:
+            return self._send_error(413, "bad body size")
+        try:
+            body = json.loads(self.rfile.read(length))
+            mode = body.get("choices") if isinstance(body, dict) else None
+        except ValueError:
+            mode = None
+        if mode not in CHOICES_MODES:
+            return self._send_error(400, f"choices must be one of {', '.join(CHOICES_MODES)}")
+        write_mode(self.overlay_dir, mode)
+        self._send_json({"choices": mode})
 
     def _send_art(self, card_id: str) -> None:
         """Serve a card-art tile, caching it on disk so rows work offline."""

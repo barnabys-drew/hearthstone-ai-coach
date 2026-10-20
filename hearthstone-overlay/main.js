@@ -2,17 +2,17 @@ const { app, BrowserWindow, globalShortcut, ipcMain, net } = require('electron')
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { mergeConfig } = require('./renderer/logic.js');
+const { mergeConfig, CHOICES_MODES, nextChoicesMode } = require('./renderer/logic.js');
 
 const appDir = __dirname;
 const configPath = path.join(appDir, 'config.json');
 
 // Standalone always-on-top panels; each has its own saved bounds and
 // visibility, and every one is draggable + resizable on all four edges.
-// 'controls' is special: a tiny two-button bar that is NEVER click-through,
-// so the mouse can always reach its quit and move/lock buttons.
+// 'controls' is special: a tiny button bar that is NEVER click-through, so
+// the mouse can always reach its choices picker and quit / move-lock buttons.
 const PANELS = ['advice', 'deck', 'opponent', 'lessons', 'stats', 'controls'];
-const DATA_FILES = ['live.json', 'advice.json', 'lessons.json', 'lesson_store.json', 'deck_stats.json'];
+const DATA_FILES = ['live.json', 'advice.json', 'lessons.json', 'lesson_store.json', 'deck_stats.json', 'settings.json', 'jev.json'];
 
 const defaults = {
   overlayDir: process.env.HS_OVERLAY_DIR_WIN || path.join(os.homedir(), 'hs-overlay'),
@@ -25,7 +25,7 @@ const defaults = {
     opponent: { x: 762, y: 96, width: 260, height: 480, visible: true },
     lessons: { x: 48, y: 668, width: 430, height: 220, visible: true },
     stats: { x: 48, y: 900, width: 430, height: 150, visible: true },
-    controls: { x: 48, y: 48, width: 90, height: 36, visible: true },
+    controls: { x: 48, y: 48, width: 160, height: 36, visible: true },
   },
   hotkeys: {
     toggleClickThrough: 'CommandOrControl+Shift+F',
@@ -38,6 +38,7 @@ const defaults = {
     toggleOpponent: 'CommandOrControl+Shift+3',
     toggleLessons: 'CommandOrControl+Shift+4',
     toggleStats: 'CommandOrControl+Shift+5',
+    cycleChoices: 'CommandOrControl+Shift+J',
   },
 };
 
@@ -59,7 +60,10 @@ function armMoveModeTimer() {
 function loadConfig() {
   try {
     if (fs.existsSync(configPath)) {
-      return mergeConfig(defaults, JSON.parse(fs.readFileSync(configPath, 'utf8')), PANELS);
+      const cfg = mergeConfig(defaults, JSON.parse(fs.readFileSync(configPath, 'utf8')), PANELS);
+      // Saved configs predate the choices button; a narrower bar would clip it.
+      cfg.windows.controls.width = Math.max(cfg.windows.controls.width, defaults.windows.controls.width);
+      return cfg;
     }
   } catch (error) {
     console.error('Could not read config.json:', error);
@@ -196,6 +200,37 @@ function registerHotkeys() {
   registerHotkey(h.toggleOpponent, () => togglePanel('opponent'));
   registerHotkey(h.toggleLessons, () => togglePanel('lessons'));
   registerHotkey(h.toggleStats, () => togglePanel('stats'));
+  registerHotkey(h.cycleChoices, () => setChoices(nextChoicesMode(readChoices())));
+}
+
+// Choices mode lives in the SHARED folder (settings.json), not config.json:
+// `hst live` on the WSL side reads it to decide who answers mulligans and
+// Discovers (hstracker/choices.py).
+function settingsPath() {
+  return path.join(config.overlayDir, 'settings.json');
+}
+
+function readSettings() {
+  try {
+    const data = JSON.parse(fs.readFileSync(settingsPath(), 'utf8'));
+    return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+  } catch (_error) {
+    return {};
+  }
+}
+
+function readChoices() {
+  return readSettings().choices;
+}
+
+function setChoices(mode) {
+  if (!CHOICES_MODES.includes(mode)) throw new Error(`Unknown choices mode: ${mode}`);
+  const next = { ...readSettings(), choices: mode, updated: Date.now() / 1000 };
+  const tmp = `${settingsPath()}.tmp`;
+  fs.mkdirSync(config.overlayDir, { recursive: true });
+  fs.writeFileSync(tmp, JSON.stringify(next, null, 1));
+  fs.renameSync(tmp, settingsPath());
+  return mode;
 }
 
 // Push, don't poll: watch the shared folder and nudge only the affected
@@ -262,6 +297,8 @@ ipcMain.handle('read-json', async (_event, fileName) => {
 });
 
 ipcMain.handle('set-click-through', (_event, value) => setClickThrough(Boolean(value)));
+
+ipcMain.handle('set-choices', (_event, mode) => setChoices(String(mode)));
 
 // Quit button on the controls bar — the only mouse-driven way out, since
 // every other panel is click-through.

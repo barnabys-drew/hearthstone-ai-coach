@@ -156,6 +156,7 @@ def cmd_live(args) -> int:
     )
     from .budget import assemble, budget_enabled
     from .embed import T2Retriever, t2_live_enabled
+    from .choices import ModeWatcher, effective_mode, status_line, uses_jev
     from .jev import advisor_from_env, hand_from_snapshot
     from .lessons import StoreWatcher, mirror_store
     from .lexical import retrieve_lessons, t1_live_enabled
@@ -172,10 +173,12 @@ def cmd_live(args) -> int:
     # retriever embeds one query per game (at its first snapshot); per-turn
     # matching is pure dot products over vectors cached by `hst rag-embed`.
     t2 = T2Retriever() if t2_live_enabled() else None
-    # Mulligans and Discovers go to Jev when opted in (HS_JEV=1 +
-    # TYPESAFE_API_KEY): background calls, answers land on the overlay and as
-    # `== JEV` feed lines. Without it, the coach model handles them as before.
+    # Who answers mulligans and Discovers is picked in the overlay
+    # (settings.json: jev | coach | both | off, see choices.py) and re-read
+    # whenever it changes. Jev calls run on background threads; their answers
+    # land on the overlay and as `== JEV` feed lines.
     jev = advisor_from_env(overlay_dir)
+    choices = ModeWatcher(overlay_dir)
     jev_mulligan_done: set[tuple] = set()  # (session, game_no) already asked
     mirror_store()  # give the overlay lessons panel the structured store at startup
     _record_game_and_refresh_stats(None, resolver, overlay_dir)  # stats panel at startup
@@ -183,8 +186,7 @@ def cmd_live(args) -> int:
     print(f"Live game state (json: {json_file}). Ctrl-C to stop.", flush=True)
     if overlay_dir:
         print(f"Overlay mirror: {overlay_dir}", flush=True)
-    if jev:
-        print(f"Jev: mulligans + Discovers via {jev.client.model}", flush=True)
+    print(status_line(choices.mode, jev is not None), flush=True)
     tail: LiveGameTail | None = None
     current_dir = None
     last_marker = None  # (path, raw_turn, phase, game_over) last printed
@@ -197,6 +199,10 @@ def cmd_live(args) -> int:
     snap_failing = False  # warn once (not every poll) if snapshots stop exporting
 
     while True:
+        mode, mode_changed = choices.poll()
+        if mode_changed:
+            print(status_line(mode, jev is not None), flush=True)
+        choice_mode = effective_mode(mode, jev is not None)
         if jev:
             for line in jev.drain():
                 print(line, flush=True)
@@ -274,13 +280,15 @@ def cmd_live(args) -> int:
                 marker = (str(tail.path), snap["raw_turn"], snap.get("phase"), snap.get("game_over"))
 
                 game_key = (current_dir.name, tail.game_no)
-                if jev and snap.get("phase") == "mulligan" and game_key not in jev_mulligan_done:
+                if (jev and uses_jev(choice_mode) and snap.get("phase") == "mulligan"
+                        and game_key not in jev_mulligan_done):
                     hand = hand_from_snapshot(
                         snap, resolver, deck_counts, deck_name,
                         tail.meta.get("FormatType") or deck_format, tail.meta.get("GameType"))
                     if hand:
                         jev_mulligan_done.add(game_key)
-                        jev.mulligan(hand, session=current_dir.name, game_no=tail.game_no)
+                        jev.mulligan(hand, publish=choice_mode == "jev", mode=choice_mode,
+                                     session=current_dir.name, game_no=tail.game_no)
 
                 # Tier 2: Check for pending unresolved Discovers (best-effort)
                 if tail.last_tree and tail.last_friendly_id is not None:
@@ -296,11 +304,13 @@ def cmd_live(args) -> int:
                                     for opt in discover.get("options", [])
                                 )
                                 print(
-                                    f"== DISCOVER PENDING — {discover['source']}: {options_str}",
+                                    f"== DISCOVER PENDING [choices: {choice_mode}] — "
+                                    f"{discover['source']}: {options_str}",
                                     flush=True
                                 )
-                                if jev:
-                                    jev.discover(snap, discover, session=current_dir.name,
+                                if jev and uses_jev(choice_mode):
+                                    jev.discover(snap, discover, publish=choice_mode == "jev",
+                                                 mode=choice_mode, session=current_dir.name,
                                                  game_no=tail.game_no)
                     except Exception:
                         pass  # Silently skip pending_discovers errors
@@ -344,7 +354,12 @@ def cmd_live(args) -> int:
                             flush=True,
                         )
                     last_marker = marker
-                    print(format_snapshot(snap), flush=True)
+                    text = format_snapshot(snap)
+                    if snap.get("phase") == "mulligan":
+                        # The mode rides on the decision line itself, so the
+                        # coach never has to remember an earlier mode line.
+                        text = text.replace("== MULLIGAN —", f"== MULLIGAN [choices: {choice_mode}] —", 1)
+                    print(text, flush=True)
                     last_snap = snap
                 elif last_snap:
                     # Tier 1: Report mid-turn changes (hand/board)

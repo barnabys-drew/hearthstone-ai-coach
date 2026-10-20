@@ -86,5 +86,53 @@
     return cfg;
   }
 
-  return { escapeHtml, isValidCardId, cardRowHtml, isAdviceStale, mergeConfig, panelLessons, lessonLabel };
+  // Who answers mulligans and Discovers (hstracker/choices.py owns the
+  // semantics; the overlay only picks and displays). Order = click cycle.
+  const CHOICES_MODES = ['jev', 'coach', 'both', 'off'];
+  const CHOICES_LABELS = { jev: 'Jev', coach: 'Coach', both: 'Both', off: 'Off' };
+
+  function choicesMode(settings) {
+    const mode = settings && settings.choices;
+    return CHOICES_MODES.includes(mode) ? mode : null; // null = tracker default
+  }
+
+  function nextChoicesMode(mode) {
+    const i = CHOICES_MODES.indexOf(mode);
+    return CHOICES_MODES[(i + 1) % CHOICES_MODES.length]; // unknown -> first
+  }
+
+  function choicesLabel(mode) {
+    return mode ? CHOICES_LABELS[mode] : 'Default';
+  }
+
+  // Jev's answer as a one-line second opinion, or null when it shouldn't
+  // show: nothing from Jev, Jev's answer already IS the main card, the
+  // answer is for a different decision than the card on screen, or it is
+  // older than maxAge seconds (a previous game's mulligan).
+  function secondOpinion(advice, jev, nowSeconds, maxAge = 180) {
+    if (!jev || !jev.ts || nowSeconds - Number(jev.ts) > maxAge) return null;
+    if (advice && String(advice.model || '').startsWith('jev')) return null;
+    if (jev.kind === 'mulligan') {
+      // Beside the coach's mulligan card, or over whatever older card is up
+      // (last game's post-mortem) until the coach answers; gone once a newer
+      // turn card replaces it.
+      const newerTurnCard = advice && advice.kind !== 'mulligan' && Number(advice.ts || 0) > Number(jev.ts);
+      if (newerTurnCard) return null;
+      const rows = (jev.mulligan || []).map((r) => {
+        const pct = /(\d+%)/.exec(r.reason || '');
+        return `${r.keep ? 'keep' : 'toss'} ${r.card}${pct ? ` ${pct[1]}` : ''}`;
+      });
+      return rows.length ? `Jev: ${rows.join(' · ')}` : null;
+    }
+    if (jev.kind === 'discover' && jev.discover) {
+      if (advice && advice.turn != null && jev.turn != null && Number(advice.turn) > Number(jev.turn)) return null;
+      return `Jev: ${jev.discover}`;
+    }
+    return null;
+  }
+
+  return {
+    escapeHtml, isValidCardId, cardRowHtml, isAdviceStale, mergeConfig, panelLessons, lessonLabel,
+    CHOICES_MODES, choicesMode, nextChoicesMode, choicesLabel, secondOpinion,
+  };
 });

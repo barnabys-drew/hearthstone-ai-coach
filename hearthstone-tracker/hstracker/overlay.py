@@ -302,6 +302,13 @@ def write_discover(text: str, overlay_dir: str | os.PathLike[str] | None = None)
     return atomic_write_json(path, normalize_advice(current))
 
 
+def write_jev(payload: dict[str, Any], overlay_dir: str | os.PathLike[str] | None = None) -> Path:
+    """Jev's latest answer, in its own file so it survives the coach's next
+    advice write: the overlay shows it as a second opinion in `both` mode."""
+    directory = resolve_overlay_dir(overlay_dir)
+    return atomic_write_json(directory / "jev.json", {**payload, "ts": time.time()})
+
+
 def mirror_live_snapshot(snapshot: dict[str, Any], overlay_dir: str | os.PathLike[str] | None = None) -> Path:
     directory = resolve_overlay_dir(overlay_dir)
     return atomic_write_json(directory / "live.json", snapshot)

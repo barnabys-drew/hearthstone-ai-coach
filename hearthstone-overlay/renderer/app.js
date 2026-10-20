@@ -1,5 +1,8 @@
 const $ = (id) => document.getElementById(id);
-const { escapeHtml, isValidCardId, cardRowHtml, isAdviceStale, panelLessons, lessonLabel } = window.OverlayLogic;
+const {
+  escapeHtml, isValidCardId, cardRowHtml, isAdviceStale, panelLessons, lessonLabel,
+  CHOICES_MODES, choicesMode, nextChoicesMode, choicesLabel, secondOpinion,
+} = window.OverlayLogic;
 
 // Which panel this window shows: advice | deck | opponent | lessons | all (browser mode).
 const panel = new URLSearchParams(location.search).get('panel') || 'all';
@@ -11,6 +14,8 @@ let advice = null;
 let lessonsDoc = null;
 let lessonStore = null;
 let deckStats = null;
+let settings = null; // settings.json: who answers mulligans/Discovers (choices picker)
+let jevDoc = null; // jev.json: Jev's latest answer, shown as a second opinion
 let deckSeen = new Map(); // card key -> last seen copies-left, to flash changed rows
 
 // Card art: resolved through the host (Electron disk cache / serve.py cache),
@@ -94,6 +99,10 @@ function renderAdvice() {
   $('mulligan').innerHTML = mulligan.map((row) => `<div class="mulligan-row"><span class="badge ${row.keep ? 'keep' : 'toss'}">${row.keep ? 'KEEP' : 'TOSS'}</span><div><strong>${escapeHtml(row.card)}</strong><br><span class="empty">${escapeHtml(row.reason || '')}</span></div></div>`).join('');
   setHidden($('mulligan'), !mulligan.length);
 
+  const second = secondOpinion(current, jevDoc, Date.now() / 1000);
+  $('second-opinion').textContent = second || '';
+  setHidden($('second-opinion'), !second);
+
   $('warning').textContent = current.warning || '';
   setHidden($('warning'), !current.warning);
 
@@ -103,6 +112,26 @@ function renderAdvice() {
   if (dataPath) dataPath.textContent = current.model ? `${config.overlayDir} · coach: ${current.model}` : config.overlayDir;
 
   setHidden($('stale'), !isAdviceStale(current, live?.turn, config.staleAdviceSeconds, Date.now() / 1000));
+  renderChoices($('choices-toggle'), (label) => `choices: ${label}`);
+}
+
+// The picker's current state on whichever button this window has: the
+// controls bar (Electron) or the advice footer (browser mode).
+function renderChoices(node, format = (label) => label) {
+  if (!node) return;
+  const mode = choicesMode(settings);
+  node.textContent = format(choicesLabel(mode));
+  node.classList.remove(...CHOICES_MODES);
+  if (mode) node.classList.add(mode);
+}
+
+async function cycleChoices() {
+  try {
+    await window.overlayAPI.setChoices(nextChoicesMode(choicesMode(settings)));
+    if (await pollFile('settings.json')) render();
+  } catch (error) {
+    console.warn('could not change choices mode:', error);
+  }
 }
 
 function renderLessons() {
@@ -155,6 +184,7 @@ function render() {
   if (panel === 'advice' || panel === 'all') renderAdvice();
   if (panel === 'lessons' || panel === 'all') renderLessons();
   if (panel === 'stats' || panel === 'all') renderStats();
+  if (panel === 'controls') renderChoices($('btn-choices'));
 }
 
 async function pollFile(fileName) {
@@ -167,6 +197,8 @@ async function pollFile(fileName) {
       if (fileName === 'lessons.json') lessonsDoc = result.data;
       if (fileName === 'lesson_store.json') lessonStore = result.data;
       if (fileName === 'deck_stats.json') deckStats = result.data;
+      if (fileName === 'settings.json') settings = result.data;
+      if (fileName === 'jev.json') jevDoc = result.data;
       return true;
     }
   } catch (_error) {
@@ -177,13 +209,13 @@ async function pollFile(fileName) {
 
 // Each panel polls only the files it renders from.
 const FILES_BY_PANEL = {
-  advice: ['advice.json', 'live.json'],
+  advice: ['advice.json', 'live.json', 'settings.json', 'jev.json'],
   deck: ['live.json'],
   opponent: ['live.json'],
   lessons: ['lesson_store.json', 'live.json'],
   stats: ['deck_stats.json'],
-  controls: [], // buttons only — renders no data
-  all: ['live.json', 'advice.json', 'lessons.json', 'lesson_store.json', 'deck_stats.json'],
+  controls: ['settings.json'], // buttons, plus the choices picker's state
+  all: ['live.json', 'advice.json', 'lessons.json', 'lesson_store.json', 'deck_stats.json', 'settings.json', 'jev.json'],
 };
 
 async function tick() {
@@ -201,11 +233,14 @@ function wireControls() {
   window.overlayAPI.onState((state) => { clickThrough = state.clickThrough; });
   $('btn-move').addEventListener('click', () => window.overlayAPI.setClickThrough(!clickThrough));
   $('btn-quit').addEventListener('click', () => window.overlayAPI.quit?.());
+  $('btn-choices').addEventListener('click', cycleChoices);
 }
 
 async function boot() {
   document.body.dataset.panel = panel;
   if (panel === 'controls') wireControls();
+  // Browser mode has no controls bar, so the advice footer's twin is the picker.
+  if (panel === 'all') $('choices-toggle').addEventListener('click', cycleChoices);
   config = await window.overlayAPI.config();
   const dataPath = $('data-path');
   if (dataPath) dataPath.textContent = config.overlayDir;
