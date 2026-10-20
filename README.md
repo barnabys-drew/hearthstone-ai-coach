@@ -137,6 +137,51 @@ The full comparison is in [docs/jev.md](docs/jev.md): every arm, which
 differences are real, what Jev's deck-list sensitivity shows, and the limits.
 The scores measure agreement with my keeps, not correctness.
 
+### Setting up Jev
+
+Jev is optional. Without it, everything below works and the coach model
+answers mulligans and Discovers itself.
+
+1. **Get a TypeSafe API key** ([docs.typesafe.ai](https://docs.typesafe.ai/api.md)).
+   Jev bills input tokens only, about $0.04 per million. A mulligan is about
+   700 tokens, so a thousand of them cost roughly 3.5 cents.
+2. **Export it in the shell that starts the feed**, and launch the feed:
+   ```bash
+   export TYPESAFE_API_KEY=...        # never commit it; keep it in your shell profile or an untracked .env
+   HS_JEV=1 HS_COACH_GATED=1 hearthstone-tracker/coach_feed.sh
+   ```
+   `HS_JEV=1` makes Jev the default until you pick a mode in the overlay.
+   `HS_COACH_GATED=1` turns on the per-turn check gate.
+3. **Pick who answers** on the overlay: the choices button on the top-left
+   controls bar or `Ctrl+Shift+J` in the Electron app, or the **choices:**
+   button in the advice footer in browser mode. It cycles through four modes:
+
+   | Mode | Mulligans and Discovers |
+   |---|---|
+   | **Jev** | Jev answers in ~0.2s; its card goes on the overlay and the coach stays quiet |
+   | **Coach** | your coaching model answers, as without Jev |
+   | **Both** | both answer independently: the coach's card plus a green "Jev:" second-opinion strip, logged side by side |
+   | **Off** | nobody advises; you decide alone |
+
+   The pick is saved to `settings.json` in the overlay folder, and `hst live`
+   applies it from the next mulligan, with no restart. Turn plans always come
+   from your coaching model.
+4. **Check it:** `hearthstone-tracker/hst selftest` runs the Jev path against
+   a fake API (no network, no spend). It reports PASS with the active mode
+   when the key is set, or WARN when it's missing.
+5. **If you run the Electron overlay from a Windows copy** (the
+   `start-overlay.cmd` setup), re-copy the overlay files after updating the
+   repo so the choices button appears. The steps are in
+   [`hearthstone-overlay/SKILL.md`](hearthstone-overlay/SKILL.md). Browser
+   mode serves straight from the repo and needs nothing.
+
+In the feed, each mulligan and Discover line shows the mode in force
+(`== MULLIGAN [choices: jev] — ...`), and Jev's answers arrive as
+`== JEV MULLIGAN` / `== JEV DISCOVER` lines. If a call fails, the feed prints
+one `!! Jev ... failed` line and the coach answers that decision instead.
+Every answer goes to the retrieval log with its probabilities, latency and
+cost, so `hst coach-report` attributes it like any other advice.
+
 > **Model-agnostic turn coaching, one opt-in classifier.** The turn coach is
 > whatever AI CLI you already use — Claude Code, Codex, Cursor, Gemini CLI, or
 > a plain chat window — following the same SKILL.md playbook over the same

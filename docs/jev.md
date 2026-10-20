@@ -160,7 +160,9 @@ it, and it's a strong one for a decision of this shape.
 
 ## How it runs in the coach
 
-`hearthstone-tracker/hstracker/jev.py`, needing `TYPESAFE_API_KEY`:
+`hearthstone-tracker/hstracker/jev.py`, needing `TYPESAFE_API_KEY`. Setup
+steps (key, launch command, picker, checking it) are in the README's
+[Setting up Jev](../README.md#setting-up-jev) section.
 
 1. `hst live` sees a mulligan-phase snapshot or a new pending Discover, and
    checks the choices mode picked in the overlay (see below).
