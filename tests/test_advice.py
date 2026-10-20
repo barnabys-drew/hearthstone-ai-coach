@@ -138,6 +138,12 @@ class LatencyTests(unittest.TestCase):
                   match_ev(5, 200.0), advice_ev(5, ["x"], 200.0 + 500)]
         self.assertEqual(latency_rows(events), [])
 
+    def test_jev_answers_are_not_coach_latency(self) -> None:
+        events = [match_ev(3, 100.0),
+                  advice_ev(3, [], 100.2, kind="discover", model="jev-1.13.0", variant="jev"),
+                  advice_ev(3, ["x"], 125.0)]
+        self.assertEqual(latency_rows(events), [25.0])
+
 
 class CoachReportTests(unittest.TestCase):
     def test_report_joins_and_counts(self) -> None:

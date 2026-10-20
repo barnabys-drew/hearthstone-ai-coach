@@ -58,11 +58,8 @@ def write_mode(overlay_dir: str | os.PathLike[str], mode: str) -> Path:
     except (OSError, ValueError):
         current = {}
     current.update({"choices": mode, "updated": time.time()})
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(current, indent=1), encoding="utf-8")
-    os.replace(tmp, path)
-    return path
+    from .overlay import atomic_write_json  # lazy: keeps pydantic off read-only imports
+    return atomic_write_json(path, current)
 
 
 def effective_mode(mode: str, jev_available: bool) -> str:

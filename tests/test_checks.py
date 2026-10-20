@@ -82,6 +82,25 @@ class TestLethalGate(unittest.TestCase):
         ))
         self.assertNotIn("lethal", names(r))
 
+    def test_minion_or_hero_damage_still_counts(self):
+        r = live_checks(snap(
+            me={"hand": [card("Bolt", text="Deal 3 damage to an enemy minion or hero.")]},
+            opp={"hp": 3},
+        ))
+        self.assertIn("lethal", names(r))
+
+    def test_minion_only_sentence_does_not_hide_a_face_sentence(self):
+        r = live_checks(snap(
+            me={"hand": [card("Split", text="Deal 2 damage to a minion. Deal 4 damage to the enemy hero.")]},
+            opp={"hp": 4},
+        ))
+        self.assertIn("lethal", names(r))
+        r = live_checks(snap(
+            me={"hand": [card("Split", text="Deal 2 damage to a minion. Deal 4 damage to the enemy hero.")]},
+            opp={"hp": 6},
+        ))
+        self.assertNotIn("lethal", names(r), "only the hero sentence's 4 counts")
+
     def test_locations_cannot_attack(self):
         r = live_checks(snap(
             me={"board": [minion("Sanguine Depths", atk=9, location=True)]},

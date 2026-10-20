@@ -200,7 +200,15 @@ function registerHotkeys() {
   registerHotkey(h.toggleOpponent, () => togglePanel('opponent'));
   registerHotkey(h.toggleLessons, () => togglePanel('lessons'));
   registerHotkey(h.toggleStats, () => togglePanel('stats'));
-  registerHotkey(h.cycleChoices, () => setChoices(nextChoicesMode(readChoices())));
+  registerHotkey(h.cycleChoices, () => {
+    // A throw here would be uncaught in the main process (an error dialog
+    // mid-game) when the shared folder is briefly unwritable.
+    try {
+      setChoices(nextChoicesMode(readChoices()));
+    } catch (error) {
+      console.warn('Could not change the choices mode:', error.message);
+    }
+  });
 }
 
 // Choices mode lives in the SHARED folder (settings.json), not config.json:

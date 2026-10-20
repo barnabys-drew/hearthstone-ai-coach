@@ -33,9 +33,6 @@ import sqlite3
 import statistics
 import sys
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
@@ -49,8 +46,8 @@ from hstracker.cards import HeroClassResolver  # noqa: E402
 from hstracker.config import DEFAULT_DB  # noqa: E402
 from hstracker.jev import (  # noqa: E402  the production prompt: the lab tests what ships
     API_URL as JEV_URL, KEEP_THRESHOLD, MODEL as JEV_MODEL,
-    PRICE_PER_M_INPUT as JEV_PRICE_IN, describe_card, mulligan_questions,
-    mulligan_state, slot_label,
+    PRICE_PER_M_INPUT as JEV_PRICE_IN, JevClient, decklist_lines, describe_card,
+    mulligan_questions, mulligan_state, slot_label,
 )
 
 HERE = Path(__file__).resolve().parent
@@ -88,12 +85,8 @@ def decklist(deckstring: str | None, cards: HeroClassResolver) -> list[str]:
         decoded = decode_deckstring(deckstring)
     except Exception:
         return []
-    rows = []
-    for dbf, count in decoded["cards"]:
-        c = cards.card_by_dbf(dbf)
-        rows.append((c.get("cost") if isinstance(c.get("cost"), int) else 99,
-                     c.get("name") or f"dbf {dbf}", count))
-    return [f"{n}x {name} ({cost})" for cost, name, n in sorted(rows)]
+    return decklist_lines([(cards.card_by_dbf(dbf) or {"name": f"dbf {dbf}"}, count)
+                           for dbf, count in decoded["cards"]])
 
 
 def build_hands(db_path: Path, cards: HeroClassResolver) -> tuple[list[dict], dict[str, int]]:
@@ -239,36 +232,13 @@ def make_claude_arm(effort: str | None, client: Any = None, *, model: str = HAIK
 
 def make_jev_arm(api_key: str, url: str = JEV_URL, timeout: float = 30.0,
                  retries: int = 3, post: Callable | None = None) -> Callable[[dict, bool], dict]:
-    if urllib.parse.urlsplit(url).scheme not in ("http", "https"):
-        raise ValueError("Jev API url must be http(s)")
-
-    def _post(body: bytes) -> dict[str, Any]:
-        req = urllib.request.Request(url, data=body, method="POST", headers={
-            "Authorization": f"Bearer {api_key}", "Content-Type": "application/json"})
-        for attempt in range(retries + 1):
-            try:
-                with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected -- scheme checked above
-                    return json.loads(resp.read())
-            except urllib.error.HTTPError as e:
-                if (e.code in (429, 529) or e.code >= 500) and attempt < retries:
-                    time.sleep(2 ** attempt)
-                    continue
-                raise RuntimeError(f"Jev returned HTTP {e.code}") from e
-            except (urllib.error.URLError, TimeoutError) as e:
-                if attempt < retries:
-                    time.sleep(2 ** attempt)
-                    continue
-                raise RuntimeError(f"Jev unreachable: {e}") from e
-        raise RuntimeError("unreachable")  # pragma: no cover
-
-    send = post or _post
+    """The Jev arm, asked through the tracker's own JevClient (same HTTP,
+    headers and retries as production; only the timeout is longer)."""
+    client = JevClient(api_key, url=url, timeout=timeout, retries=retries, post=post)
 
     def ask(hand: dict[str, Any], with_decklist: bool) -> dict[str, Any]:
-        body = json.dumps({"model": JEV_MODEL,
-                           "state": hand_state(hand, with_decklist=with_decklist),
-                           "questions": jev_questions(hand)}).encode()
         t0 = time.monotonic()
-        resp = send(body)
+        resp = client.ask(hand_state(hand, with_decklist=with_decklist), jev_questions(hand))
         latency = time.monotonic() - t0
         keeps, probs = parse_jev(resp, hand)
         tin = int(resp.get("usage", {}).get("input_tokens", 0))

@@ -88,33 +88,22 @@ def cmd_watch(args) -> int:
     return 0
 
 
-def _current_deck_name(session_dir) -> str | None:
-    """Name of the most recently queued deck, from Decks.log."""
-    events = [ev for path in deck_logs(session_dir) for ev in parse_decks_log(path)]
-    return events[-1].name if events else None
-
-
-def _current_deck_format(session_dir) -> int | None:
-    """FormatType id of the most recently queued deck, from Decks.log."""
-    from .decks import deckstring_format
-
-    events = [ev for path in deck_logs(session_dir) for ev in parse_decks_log(path)]
-    return deckstring_format(events[-1].deckstring) if events else None
-
-
-def _current_deck_counts(session_dir, resolver) -> dict[str, int] | None:
-    """{card_id: copies} for the most recently queued deck, from Decks.log."""
-    from .decks import decode_deckstring_counts
+def _current_deck(session_dir, resolver) -> tuple[dict[str, int] | None, str | None, int | None]:
+    """(counts {card_id: copies}, name, FormatType id) of the most recently
+    queued deck, from ONE pass over the session's Decks.log files: this runs
+    at every game start, right when the mulligan wants low latency."""
+    from .decks import decode_deckstring_counts, deckstring_format
 
     events = [ev for path in deck_logs(session_dir) for ev in parse_decks_log(path)]
     if not events:
-        return None
+        return None, None, None
+    last = events[-1]
     counts: dict[str, int] = {}
-    for dbf, n in decode_deckstring_counts(events[-1].deckstring).items():
+    for dbf, n in decode_deckstring_counts(last.deckstring).items():
         card_id = resolver.card_by_dbf(dbf).get("id")
         if card_id:
             counts[card_id] = n
-    return counts or None
+    return counts or None, last.name, deckstring_format(last.deckstring)
 
 
 def _record_game_and_refresh_stats(session_dir, resolver, overlay_dir) -> list | None:
@@ -221,9 +210,7 @@ def cmd_live(args) -> int:
             if tail.game_no != deck_game_no:
                 # A new game began; re-read Decks.log for the deck just queued.
                 deck_game_no = tail.game_no
-                deck_counts = _current_deck_counts(current_dir, resolver)
-                deck_name = _current_deck_name(current_dir)
-                deck_format = _current_deck_format(current_dir)
+                deck_counts, deck_name, deck_format = _current_deck(current_dir, resolver)
                 # Stats panel follows the deck you QUEUED with, from game start.
                 try:
                     from .db import connect

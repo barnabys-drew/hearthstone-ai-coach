@@ -171,15 +171,21 @@ test('secondOpinion: Jev beside the coach, never duplicating or outliving the de
     { card: 'For Glory!', keep: false, reason: 'Jev: 22% keep' },
   ] };
   const coachMull = { kind: 'mulligan', model: 'haiku-5-5', ts: 1010 };
-  assert.equal(secondOpinion(coachMull, jevMull, 1020), 'Jev: keep Slam 72% · toss For Glory! 22%');
-  assert.equal(secondOpinion({ kind: 'mulligan', model: 'jev-1.13.0', ts: 1000 }, jevMull, 1020), null,
+  assert.equal(secondOpinion(coachMull, jevMull, 1020, 'both'), 'Jev: keep Slam 72% · toss For Glory! 22%');
+  assert.equal(secondOpinion({ kind: 'mulligan', model: 'jev-1.13.0', ts: 1000 }, jevMull, 1020, 'both'), null,
     'Jev already is the main card');
-  assert.equal(secondOpinion({ kind: 'gameover', ts: 900 }, jevMull, 1020) !== null, true,
+  assert.equal(secondOpinion({ kind: 'gameover', ts: 900 }, jevMull, 1020, 'both') !== null, true,
     'shows over last game\'s card until the coach answers');
-  assert.equal(secondOpinion({ kind: 'turn', ts: 1100 }, jevMull, 1120), null, 'a newer turn card hides it');
-  assert.equal(secondOpinion(coachMull, jevMull, 1000 + 181), null, 'stale after 3 minutes');
-  assert.equal(secondOpinion(coachMull, null, 1020), null);
+  assert.equal(secondOpinion({ kind: 'turn', ts: 1100 }, jevMull, 1120, 'both'), null, 'a newer turn card hides it');
+  assert.equal(secondOpinion(coachMull, jevMull, 1000 + 181, 'both'), null, 'stale after 3 minutes');
+  assert.equal(secondOpinion(coachMull, null, 1020, 'both'), null);
   const jevDisc = { kind: 'discover', ts: 2000, turn: 5, discover: 'Pick B — Jev 70%' };
-  assert.equal(secondOpinion({ kind: 'turn', turn: 5, model: 'haiku-5-5', ts: 2001 }, jevDisc, 2010), 'Jev: Pick B — Jev 70%');
-  assert.equal(secondOpinion({ kind: 'turn', turn: 6, ts: 2050 }, jevDisc, 2060), null, 'next turn hides it');
+  assert.equal(secondOpinion({ kind: 'turn', turn: 5, model: 'haiku-5-5', ts: 2001 }, jevDisc, 2010, 'both'), 'Jev: Pick B — Jev 70%');
+  assert.equal(secondOpinion({ kind: 'turn', turn: 6, ts: 2050 }, jevDisc, 2060, 'both'), null, 'next turn hides it');
+  // Only `both` shows it: in `jev` mode the Discover pick is already the main
+  // banner (it was shown twice), and in `coach`/`off` Jev doesn't belong on screen.
+  for (const mode of ['jev', 'coach', 'off', null]) {
+    assert.equal(secondOpinion(coachMull, jevMull, 1020, mode), null, `hidden in ${mode}`);
+    assert.equal(secondOpinion({ kind: 'turn', turn: 5, model: 'haiku-5-5', ts: 2001 }, jevDisc, 2010, mode), null);
+  }
 });

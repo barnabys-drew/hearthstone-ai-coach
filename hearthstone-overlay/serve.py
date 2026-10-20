@@ -17,6 +17,7 @@ import argparse
 import json
 import re
 import sys
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -29,7 +30,17 @@ from hstracker.overlay import resolve_overlay_dir  # noqa: E402
 RENDERER_DIR = Path(__file__).resolve().parent / "renderer"
 DATA_FILES = {"live.json", "advice.json", "lessons.json", "lesson_store.json", "deck_stats.json",
               "settings.json", "jev.json"}
-LOCAL_HOSTS = ("localhost", "127.0.0.1", "[::1]", "")
+LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _hostname(value: str) -> str | None:
+    """Host part of a Host header or Origin, IPv6-aware ('[::1]:8420' -> '::1')."""
+    if "://" not in value:
+        value = f"//{value}"
+    try:
+        return urllib.parse.urlsplit(value).hostname
+    except ValueError:
+        return None
 MAX_SETTINGS_BODY = 1024
 MIME = {".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".ttf": "font/ttf"}
 ART_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -62,8 +73,10 @@ class OverlayHandler(BaseHTTPRequestHandler):
             self._send_static("index.html" if path == "/" else path.lstrip("/"))
 
     def _local_host(self) -> bool:
-        host = (self.headers.get("Host") or "").split(":", 1)[0].lower()
-        return host in LOCAL_HOSTS
+        host = self.headers.get("Host")
+        if not host:
+            return True  # HTTP/1.0 clients omit it; the socket is loopback-only anyway
+        return _hostname(host) in LOCAL_HOSTS
 
     def do_POST(self) -> None:  # noqa: N802 (stdlib naming)
         """The only write: the choices picker (POST /settings {"choices": mode}).
@@ -75,10 +88,10 @@ class OverlayHandler(BaseHTTPRequestHandler):
         if not self._local_host():
             return self._send_error(403, "forbidden host")
         origin = self.headers.get("Origin")
-        if origin is not None:
-            origin_host = origin.split("://", 1)[-1].split(":", 1)[0].lower()
-            if origin_host not in LOCAL_HOSTS or origin == "null":
-                return self._send_error(403, "forbidden origin")
+        if origin is not None and _hostname(origin) not in LOCAL_HOSTS:
+            # Covers foreign sites, "null" (sandboxed/file pages) and an empty
+            # authority like "file://", which parses to no hostname at all.
+            return self._send_error(403, "forbidden origin")
         if self.path.split("?", 1)[0] != "/settings":
             return self._send_error(404, "not found")
         if (self.headers.get("Content-Type") or "").split(";", 1)[0].strip() != "application/json":

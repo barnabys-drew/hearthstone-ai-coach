@@ -128,6 +128,11 @@ def latency_detail_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for ev in events:
         if ev.get("ev") != "advice" or not ev.get("ts"):
             continue
+        if ev.get("variant") == "jev":
+            # Jev answers inside the tracker in ~0.2s; counting it here would
+            # pull the coach's median toward Jev's and hide the very latency
+            # this report exists to expose. Jev logs its own latency per event.
+            continue
         ts, turn = ev["ts"], ev.get("turn")
         best = None
         for mts, mturn in markers:

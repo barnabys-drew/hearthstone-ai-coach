@@ -119,6 +119,69 @@ class ServeSettingsTests(unittest.TestCase):
         self.assertEqual(self.post('{"choices": "jev"}', path="/data/live.json"), 404)
         self.assertEqual(self.post("x" * 2000), 413)
 
+    def test_ipv6_loopback_and_empty_origins(self):
+        # [::1] is loopback and must work; an Origin with no host must not.
+        self.assertEqual(self.post('{"choices": "coach"}', origin=f"http://[::1]:{self.port}"), 200)
+        self.assertEqual(self.post('{"choices": "jev"}', origin="file://"), 403)
+        self.assertEqual(self.serve._hostname("[::1]:8420"), "::1")
+        self.assertEqual(self.serve._hostname("LOCALHOST:8420"), "localhost")
+        self.assertIsNone(self.serve._hostname("file://"))
+
+
+class AtomicWriteTests(unittest.TestCase):
+    def test_concurrent_writers_never_collide(self):
+        """Jev answers are written from background threads; they used to share
+        one temp file per process."""
+        import threading
+
+        from hstracker.overlay import atomic_write_json
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "jev.json"
+            errors = []
+
+            def write(i):
+                try:
+                    for _ in range(40):
+                        atomic_write_json(target, {"writer": i, "pad": "x" * 2000})
+                except Exception as e:  # noqa: BLE001 - any failure is the finding
+                    errors.append(e)
+
+            threads = [threading.Thread(target=write, args=(i,)) for i in range(6)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            self.assertEqual(errors, [])
+            self.assertIn(json.loads(target.read_text(encoding="utf-8"))["writer"], range(6))
+            self.assertEqual(list(Path(tmp).glob(".*.tmp")), [])
+
+
+class CurrentDeckTests(unittest.TestCase):
+    def test_one_decks_log_pass_gives_counts_name_and_format(self):
+        from datetime import datetime
+
+        from hstracker import cli
+        from hstracker.decks import DeckEvent
+
+        deck = "AAECAaKaBgL8rweqyQcOhqAEjtQEkNQE4+YG6IcHhZUH1aYH7awHj7EH0LIH1rIHlcIHm8IHnMIHAAA="
+        calls = []
+
+        def fake_parse(path):
+            calls.append(path)
+            return [DeckEvent(datetime(2026, 7, 4), "Burn Warrior", deck)]
+
+        class Resolver:
+            def card_by_dbf(self, dbf):
+                return {"id": f"C{dbf}"}
+
+        with mock.patch.object(cli, "deck_logs", return_value=["Decks.log"]), \
+                mock.patch.object(cli, "parse_decks_log", side_effect=fake_parse):
+            counts, name, fmt = cli._current_deck("S", Resolver())
+        self.assertEqual(len(calls), 1)
+        self.assertEqual((name, fmt), ("Burn Warrior", 2))
+        self.assertEqual(sum(counts.values()), 30)
+
 
 if __name__ == "__main__":
     unittest.main()

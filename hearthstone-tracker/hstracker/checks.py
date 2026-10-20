@@ -44,11 +44,15 @@ _DAMAGE_RE = re.compile(r"deal\s+\$?(\d+)\s+damage", re.I)
 
 # ...unless the text says it can only hit minions. Kept narrow on purpose: a
 # missed lethal is a lost game, so anything ambiguous counts as face-capable.
+# Judged per sentence, and a sentence that also names a hero or character
+# ("to an enemy minion or hero") still counts: "minion" appearing somewhere
+# in it is not the same as "minions only".
 _MINION_ONLY_RE = re.compile(
     r"to\s+(a|an|another|all|each|any)\s+[^.]*?minion|"
     r"to\s+(a|an)\s+(friendly|damaged|random\s+friendly)",
     re.I,
 )
+_FACE_RE = re.compile(r"\b(hero|heroes|character|characters|face)\b", re.I)
 
 # The random-splash trap is specifically about randomness that can DESTROY YOUR
 # INTENDED TARGET before a later numbered step reaches it (Erupting Volcano
@@ -122,11 +126,11 @@ def _hand_burn(side: dict[str, Any]) -> int:
     """Upper bound on face damage sitting in hand. Generous by design."""
     total = 0
     for c in side.get("hand") or []:
-        text = c.get("text") or ""
-        if _MINION_ONLY_RE.search(text):
-            continue
-        for m in _DAMAGE_RE.finditer(text):
-            total += int(m.group(1))
+        for sentence in re.split(r"[.;]", c.get("text") or ""):
+            if _MINION_ONLY_RE.search(sentence) and not _FACE_RE.search(sentence):
+                continue
+            for m in _DAMAGE_RE.finditer(sentence):
+                total += int(m.group(1))
     return total
 
 

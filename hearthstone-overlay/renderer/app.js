@@ -99,7 +99,7 @@ function renderAdvice() {
   $('mulligan').innerHTML = mulligan.map((row) => `<div class="mulligan-row"><span class="badge ${row.keep ? 'keep' : 'toss'}">${row.keep ? 'KEEP' : 'TOSS'}</span><div><strong>${escapeHtml(row.card)}</strong><br><span class="empty">${escapeHtml(row.reason || '')}</span></div></div>`).join('');
   setHidden($('mulligan'), !mulligan.length);
 
-  const second = secondOpinion(current, jevDoc, Date.now() / 1000);
+  const second = secondOpinion(current, jevDoc, Date.now() / 1000, choicesMode(settings));
   $('second-opinion').textContent = second || '';
   setHidden($('second-opinion'), !second);
 

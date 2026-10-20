@@ -178,8 +178,8 @@ def hand_from_snapshot(snap: dict[str, Any], resolver: Any,
     if not offered:
         return None
     dealt = sum(c["copies"] for c in offered.values())
-    decklist = decklist_lines([(resolver.card(cid), n) for cid, n in (deck_counts or {}).items()
-                               if resolver.card(cid)])
+    decklist = decklist_lines([(card, n) for cid, n in (deck_counts or {}).items()
+                               if (card := resolver.card(cid))])
     return {"format": game_format, "game_label": _GAME_LABELS.get(game_type or ""),
             "my_class": me.get("class"), "opp_class": opp.get("class"),
             "going_first": dealt <= 3, "deck_name": deck_name,

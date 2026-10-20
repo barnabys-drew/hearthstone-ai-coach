@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -236,7 +237,9 @@ def resolve_overlay_dir(override: str | os.PathLike[str] | None = None) -> Path:
 
 def atomic_write_json(path: Path, payload: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    # pid AND thread: Jev answers are written from background threads, and
+    # two of them (back-to-back Discovers) must not share a temp file.
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     tmp.write_text(json.dumps(payload, indent=1, sort_keys=True), encoding="utf-8")
     os.replace(tmp, path)
     return path

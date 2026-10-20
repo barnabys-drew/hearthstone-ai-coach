@@ -106,10 +106,12 @@
   }
 
   // Jev's answer as a one-line second opinion, or null when it shouldn't
-  // show: nothing from Jev, Jev's answer already IS the main card, the
-  // answer is for a different decision than the card on screen, or it is
-  // older than maxAge seconds (a previous game's mulligan).
-  function secondOpinion(advice, jev, nowSeconds, maxAge = 180) {
+  // show: the picked mode isn't `both` (in `jev` mode Jev's answer IS the
+  // main card, Discover picks included; in `coach`/`off` it doesn't belong
+  // on screen), nothing from Jev, the answer is for a different decision
+  // than the card on screen, or it is older than maxAge seconds.
+  function secondOpinion(advice, jev, nowSeconds, mode, maxAge = 180) {
+    if (mode !== 'both') return null;
     if (!jev || !jev.ts || nowSeconds - Number(jev.ts) > maxAge) return null;
     if (advice && String(advice.model || '').startsWith('jev')) return null;
     if (jev.kind === 'mulligan') {
