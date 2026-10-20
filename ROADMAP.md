@@ -22,7 +22,6 @@ sessions with the overlay's choices picker on **Both**.
 
 | Issue | What it settles |
 |---|---|
-| [#25](https://github.com/barnabys-drew/hearthstone-ai-coach/issues/25) | Turn-plan validator: catch illegal plans before the player acts (needs no new games) |
 | [#23](https://github.com/barnabys-drew/hearthstone-ai-coach/issues/23) | Check gate on by default? Gated vs full over real games |
 | [#24](https://github.com/barnabys-drew/hearthstone-ai-coach/issues/24) | Turn-plan latency: ~24s median against a 15s timer |
 | [#26](https://github.com/barnabys-drew/hearthstone-ai-coach/issues/26) | Flip fuzzy/semantic lesson retrieval live, or keep it lab-only |
@@ -32,7 +31,6 @@ sessions with the overlay's choices picker on **Both**.
 | Issue | What it settles |
 |---|---|
 | [#29](https://github.com/barnabys-drew/hearthstone-ai-coach/issues/29) | Confirm Electron 44 on Windows |
-| [#28](https://github.com/barnabys-drew/hearthstone-ai-coach/issues/28) | Sync the Windows overlay copy automatically |
 | [#27](https://github.com/barnabys-drew/hearthstone-ai-coach/issues/27) | Move to ruff 0.17's rules and unpin it |
 
 ## Ideas (design first)
@@ -42,6 +40,14 @@ sessions with the overlay's choices picker on **Both**.
 | [#30](https://github.com/barnabys-drew/hearthstone-ai-coach/issues/30) | Let the overlay choose the turn-plan model (needs a spending guard first) |
 
 ## Done recently
+
+- **Turn-plan validator (#25):** every turn and lethal publish is checked
+  against the live board (taunts, mana, cards that exist nowhere, Reborn),
+  with warnings sent back to the coach and onto the overlay.
+- **`hst overlay-sync` (#28):** keeps the Windows Electron copy current;
+  `hst selftest` warns when it drifts.
+- **Mulligan and Discover readouts in `hst coach-report`** (#20, #19): built,
+  and waiting on Both-mode games to fill them.
 
 - Jev answers mulligans and Discovers, chosen by a seven-model comparison
   ([docs/jev.md](docs/jev.md)).

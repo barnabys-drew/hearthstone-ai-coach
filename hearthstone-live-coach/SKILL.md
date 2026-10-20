@@ -260,6 +260,16 @@ is unmeasurable.
 }'
 ```
 
+**Read the publish output for `PLAN CHECK` lines.** Every turn and lethal
+publish is checked against the live board. A line like
+`PLAN CHECK (taunt): Voidwalker has Taunt and isn't dealt with before the face attacks`
+means the plan as written can't be legal. The four rules are a taunt left up
+before face attacks, more mana than available, a card that exists nowhere,
+and a Reborn minion "killed" once. The warning is already on the overlay. Fix
+the plan and republish at once, or, if you're certain the check is wrong (a
+card you know will be drawn mid-turn), say so in one chat line. The check
+fails open, so treat every line it prints as real until shown otherwise.
+
 Advice telemetry (Phase 6a) rides every publish automatically: an `advice`
 event (id, kind, turn, steps, model, applied lessons) lands in the retrieval
 log so `hst coach-report` can measure adoption and outcomes offline. After a

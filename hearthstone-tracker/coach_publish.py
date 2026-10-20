@@ -124,10 +124,43 @@ def main(argv: list[str] | None = None) -> int:
         if args.variant and "variant" not in payload:
             payload["variant"] = args.variant
         payload["advice_id"] = _advice_id(payload)
+        plan_warnings = _plan_check(payload)
         path = write_advice(payload, args.overlay_dir)
-        _log_advice_event(payload, args)
+        _log_advice_event(payload, args, plan_warnings)
+        for w in plan_warnings:
+            # Printed back to the coach, who reads this command's output and
+            # can republish a corrected plan.
+            print(f"PLAN CHECK ({w['rule']}): {w['detail']}")
     print(path)
     return 0
+
+
+def _plan_check(payload: dict) -> list:
+    """#25: check a turn/lethal plan against the live snapshot it was written
+    for. Fails silent (no snapshot, stale, or another turn): the check is a
+    safety net and must never block a publish."""
+    if payload.get("kind") not in ("turn", "lethal") or not payload.get("steps"):
+        return []
+    try:
+        import time
+
+        from hstracker.config import DEFAULT_DB
+        from hstracker.plancheck import check_plan, format_warnings
+
+        live = Path(os.environ.get("HS_LIVE_JSON") or DEFAULT_DB.parent / "live.json")
+        if time.time() - live.stat().st_mtime > 600:
+            return []
+        snap = json.loads(live.read_text(encoding="utf-8"))
+        if snap.get("whose_turn") != "me" or (
+                payload.get("turn") is not None and snap.get("turn") != payload.get("turn")):
+            return []
+        warnings = check_plan([str(s) for s in payload["steps"]], snap)
+    except Exception:
+        return []
+    if warnings:
+        note = format_warnings(warnings)
+        payload["warning"] = f"{payload['warning']} | {note}" if payload.get("warning") else note
+    return warnings
 
 
 def _advice_id(payload: dict) -> str:
@@ -138,7 +171,7 @@ def _advice_id(payload: dict) -> str:
     return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:12]
 
 
-def _log_advice_event(payload: dict, args: argparse.Namespace) -> None:
+def _log_advice_event(payload: dict, args: argparse.Namespace, plan_warnings: list | None = None) -> None:
     """Phase 6a: one `advice` event per publish, into the retrieval log.
     Best-effort — telemetry must never block the overlay write."""
     try:
@@ -164,6 +197,9 @@ def _log_advice_event(payload: dict, args: argparse.Namespace) -> None:
             # Who the overlay said answers choices when this was published:
             # in `both` mode the coach's and Jev's answers pair up per game.
             "choices_mode": read_mode(resolve_overlay_dir(args.overlay_dir)),
+            # #25: rules the published plan tripped (empty when it checked clean
+            # or couldn't be checked).
+            "plan_check": [w["rule"] for w in plan_warnings or []],
         })
     except Exception:
         pass
