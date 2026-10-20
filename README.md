@@ -192,6 +192,8 @@ cost, so `hst coach-report` attributes it like any other advice.
 > Without them the coach model answers those as well, and tracking, the
 > overlay and game recording never depend on either.
 
+> **Roadmap:** [ROADMAP.md](ROADMAP.md) groups the open issues by what they settle and in what order.
+
 > **Status:** Useful working prototype. Public-card/deck data changes often, so agents should still browse current top-deck sources before recommending a deck.
 
 ---
