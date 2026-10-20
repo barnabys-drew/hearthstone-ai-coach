@@ -319,8 +319,25 @@ def check_jev() -> CheckResult:
     return _result("jev (mulligan/discover)", "PASS", f"{MODEL}; choices mode '{mode}'; code path OK")
 
 
+def check_overlay_app() -> CheckResult:
+    """#28: the Electron app runs from a Windows copy synced by hand; a stale
+    copy silently runs old overlay code."""
+    from .overlayapp import stale_files, windows_app_dir
+
+    app_dir = windows_app_dir()
+    if not app_dir.is_dir():
+        return _result("overlay app copy", "WARN",
+                       f"no Electron copy at {app_dir} (fine if you use browser mode)")
+    stale = stale_files(app_dir)
+    if stale:
+        return _result("overlay app copy", "WARN",
+                       f"{len(stale)} stale file(s) ({', '.join(stale[:3])}"
+                       f"{'…' if len(stale) > 3 else ''}): run `hst overlay-sync`")
+    return _result("overlay app copy", "PASS", f"in sync: {app_dir}")
+
+
 ALL_CHECKS = [
-    check_feed, check_overlay_dir, check_store, check_store_mirror, check_jev,
+    check_feed, check_overlay_dir, check_overlay_app, check_store, check_store_mirror, check_jev,
     check_p0_triggers, check_p1_telemetry, check_p2_lexical,
     check_p3_embeddings, check_p4_hygiene, check_p5_budget, check_p6_advice,
     check_kb_capture, check_renderer_logic,

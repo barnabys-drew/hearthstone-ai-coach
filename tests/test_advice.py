@@ -200,6 +200,7 @@ class SelftestTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {
             "HS_OVERLAY_DIR": str(Path(tmp) / "overlay"),
             "HS_RAG_LOG": str(Path(tmp) / "retrieval_log.jsonl"),
+            "HS_OVERLAY_APP_DIR": str(Path(tmp) / "app"),
         }):
             results = run_checks()
         fails = [r for r in results if r["status"] == "FAIL"]

@@ -52,6 +52,11 @@ npm start
 logging to `electron.log` in that folder. `stop-overlay.cmd` shuts it down.
 Right-click either file → *Send to → Desktop (create shortcut)* to pin them.
 
+**Keeping that copy current:** after pulling repo changes, run
+`hearthstone-tracker/hst overlay-sync` from WSL. It copies changed app files
+into the Windows copy and leaves your `config.json` alone. `--check` only
+lists what's stale, and `hst selftest` warns when the copy has drifted.
+
 If you want a different shared folder, edit `config.json`:
 
 ```json

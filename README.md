@@ -170,9 +170,9 @@ answers mulligans and Discovers itself.
    a fake API (no network, no spend). It reports PASS with the active mode
    when the key is set, or WARN when it's missing.
 5. **If you run the Electron overlay from a Windows copy** (the
-   `start-overlay.cmd` setup), re-copy the overlay files after updating the
-   repo so the choices button appears. The steps are in
-   [`hearthstone-overlay/SKILL.md`](hearthstone-overlay/SKILL.md). Browser
+   `start-overlay.cmd` setup), run `hearthstone-tracker/hst overlay-sync`
+   after updating the repo so the choices button appears (it keeps your
+   `config.json`). `hst selftest` warns whenever that copy is stale. Browser
    mode serves straight from the repo and needs nothing.
 
 In the feed, each mulligan and Discover line shows the mode in force

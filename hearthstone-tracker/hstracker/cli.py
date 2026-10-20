@@ -679,6 +679,39 @@ def _print_choices_readouts(events, session, stats_mod) -> None:
         print()
 
 
+def cmd_overlay_sync(args) -> int:
+    from .overlayapp import stale_files, sync, windows_app_dir
+
+    app_dir = Path(args.app_dir).expanduser() if args.app_dir else windows_app_dir()
+    if not app_dir.is_dir():
+        print(f"No overlay app copy at {app_dir}. Create it per hearthstone-overlay/README.md "
+              "(Electron mode), or pass --app-dir.", file=sys.stderr)
+        return 2
+    stale = stale_files(app_dir)
+    if args.check:
+        if stale:
+            print(f"{len(stale)} stale file(s) in {app_dir}:")
+            for rel in stale:
+                print(f"  {rel}")
+            print("Run `hst overlay-sync` to update the copy.")
+            return 1
+        print(f"Overlay app copy is up to date: {app_dir}")
+        return 0
+    result = sync(app_dir)
+    if not result["copied"] and not result["seeded"]:
+        print(f"Already up to date: {app_dir}")
+        return 0
+    for rel in result["copied"]:
+        print(f"copied  {rel}")
+    for rel in result["seeded"]:
+        print(f"seeded  {rel} (from config.example.json)")
+    if "package.json" in result["copied"]:
+        print("package.json changed: run `npm install` in that folder on Windows, then restart the overlay.")
+    else:
+        print("Restart the overlay (start-overlay.cmd) to load the new files.")
+    return 0
+
+
 def cmd_selftest(args) -> int:
     from .selftest import format_results, run_checks
     results = run_checks()
@@ -751,6 +784,11 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("selftest", help="Phase 7: PASS/WARN/FAIL every layer of the running stack (read-only, safe mid-session)")
     p.set_defaults(func=cmd_selftest)
+
+    p = sub.add_parser("overlay-sync", help="Copy changed overlay app files to the Windows Electron copy (keeps config.json)")
+    p.add_argument("--check", action="store_true", help="Only list stale files; exit 1 if any")
+    p.add_argument("--app-dir", help="The Windows copy (default: HS_OVERLAY_APP_DIR, else next to the shared overlay folder)")
+    p.set_defaults(func=cmd_overlay_sync)
 
     p = sub.add_parser("rag-maintain", help="KB hygiene: stamp per-lesson stats, merge near-dupes, archive dead knowledge (dry-run by default)")
     p.add_argument("--apply", action="store_true", help="Write the store/archive; without this, report only")

@@ -37,16 +37,17 @@ follow the exact commands, the quoting workarounds matter.
    unreliable on WSL UNC paths, so the app runs from a Windows-local copy):
 
    ```bash
-   cp <repo>/hearthstone-overlay/main.js <repo>/hearthstone-overlay/preload.js \
-      <repo>/hearthstone-overlay/package.json <repo>/hearthstone-overlay/config.example.json \
-      <repo>/hearthstone-overlay/start-overlay.cmd <repo>/hearthstone-overlay/stop-overlay.cmd \
-      /mnt/c/Users/$WINUSER/hearthstone-overlay/
-   cp <repo>/hearthstone-overlay/renderer/*.* /mnt/c/Users/$WINUSER/hearthstone-overlay/renderer/
+   <repo>/hearthstone-tracker/hst overlay-sync --check   # what's stale (exit 1 if anything)
+   <repo>/hearthstone-tracker/hst overlay-sync           # copy it over
    ```
 
-   Do NOT overwrite `C:\Users\%WINUSER%\hearthstone-overlay\config.json` — it holds
-   the user's saved panel positions. Only seed it from `config.example.json`
-   if it does not exist.
+   It copies the app files (main.js, preload.js, package.json, the .cmd
+   launchers, renderer/ and its fonts) and never overwrites `config.json`,
+   which holds the user's saved panel positions; it only seeds that file from
+   `config.example.json` when missing. If package.json changed it says so:
+   then `npm install` must run in that folder on Windows. `hst selftest`
+   WARNs whenever the copy is stale. Override the location with
+   `HS_OVERLAY_APP_DIR` or `--app-dir`.
 
 3. **Restart the Electron app**. Easy path — run the launcher script (same
    kill + detached start + log, packaged as a double-clickable .cmd the user
