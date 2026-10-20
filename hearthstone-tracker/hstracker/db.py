@@ -68,13 +68,20 @@ def connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+# Columns added after the first release. SQLite cannot bind identifiers as
+# parameters, so these are interpolated: they must stay literals defined here.
+_ADDED_COLUMNS = (("deck_name", "TEXT"), ("deckstring", "TEXT"), ("bg_tech", "INTEGER"))
+_COLUMN_TYPES = {"TEXT", "INTEGER", "REAL"}
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     existing = {row[1] for row in conn.execute("PRAGMA table_info(games)")}
     with conn:
-        for column, col_type in (
-            ("deck_name", "TEXT"), ("deckstring", "TEXT"), ("bg_tech", "INTEGER"),
-        ):
+        for column, col_type in _ADDED_COLUMNS:
             if column not in existing:
+                if not column.isidentifier() or col_type not in _COLUMN_TYPES:
+                    raise ValueError(f"refusing to add column {column!r} {col_type!r}")
+                # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
                 conn.execute(f"ALTER TABLE games ADD COLUMN {column} {col_type}")
 
 
