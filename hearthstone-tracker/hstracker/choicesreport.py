@@ -48,13 +48,22 @@ def advice_keeps(ev: dict[str, Any]) -> dict[str, bool] | None:
 
 
 def player_keeps(conn: sqlite3.Connection, start_time: str | None,
-                 name_of: Callable[[str], str | None]) -> dict[str, bool] | None:
-    """{card: kept} for the game that started at `start_time` (the outcome
-    event carries it; it is part of games.db's unique key), or None."""
-    if not start_time:
-        return None
-    row = conn.execute("SELECT id FROM games WHERE start_time = ? ORDER BY id DESC LIMIT 1",
-                       (start_time,)).fetchone()
+                 name_of: Callable[[str], str | None], *, session: str | None = None,
+                 game_no: int | None = None) -> dict[str, bool] | None:
+    """{card: kept} for one game. Joined by `start_time` when the outcome
+    carries it (games.db's unique key). Otherwise by the session folder and
+    game order: games.db records each game's Power.log path, and game N of a
+    session is the Nth CREATE_GAME. The outcome events from the live loop
+    don't always carry start_time, which is why this fallback exists."""
+    row = None
+    if start_time:
+        row = conn.execute("SELECT id FROM games WHERE start_time = ? ORDER BY id DESC LIMIT 1",
+                           (start_time,)).fetchone()
+    if row is None and session and game_no:
+        rows = conn.execute("SELECT id FROM games WHERE source_file LIKE ? ORDER BY start_time",
+                            (f"%/{session}/%",)).fetchall()
+        if len(rows) >= game_no:
+            row = rows[game_no - 1]
     if not row:
         return None
     out: dict[str, bool] = {}
@@ -106,7 +115,8 @@ def mulligan_readout(games: dict[tuple, dict[str, Any]], conn: sqlite3.Connectio
             continue
         coach = advice_keeps(coach_ev) if coach_ev else None
         jev = advice_keeps(jev_ev) if jev_ev else None
-        player = player_keeps(conn, g.get("start_time"), name_of)
+        player = player_keeps(conn, g.get("start_time"), name_of,
+                              session=session, game_no=game_no)
         c_p, j_p, c_j = agreement(coach, player), agreement(jev, player), agreement(coach, jev)
         for key, pair in (("coach", c_p), ("jev", j_p), ("coach_vs_jev", c_j)):
             if pair:

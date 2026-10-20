@@ -19,12 +19,13 @@ def db(games):
     """games: {start_time: [(card_id, offered, kept)]}"""
     conn = sqlite3.connect(":memory:")
     conn.executescript("""
-        CREATE TABLE games (id INTEGER PRIMARY KEY, start_time TEXT);
+        CREATE TABLE games (id INTEGER PRIMARY KEY, start_time TEXT, source_file TEXT);
         CREATE TABLE game_cards (game_id INTEGER, card_id TEXT, friendly INTEGER,
                                  mull_offered INTEGER, mull_kept INTEGER);
     """)
     for i, (start, cards) in enumerate(games.items(), 1):
-        conn.execute("INSERT INTO games VALUES (?, ?)", (i, start))
+        conn.execute("INSERT INTO games VALUES (?, ?, ?)",
+                     (i, start, f"/logs/Hearthstone_S{i // 10}/Power.log"))
         for cid, offered, kept in cards:
             conn.execute("INSERT INTO game_cards VALUES (?, ?, 1, ?, ?)", (i, cid, offered, kept))
         conn.execute("INSERT INTO game_cards VALUES (?, 'ROCK', 0, 1, 0)", (i,))  # opponent row
@@ -72,6 +73,17 @@ class MulliganReadoutTests(unittest.TestCase):
         events = [mull(["Slam"], [True], 100, "haiku-5-5"), outcome(1, "WON", "not in db", 600)]
         row = cr.mulligan_readout(join_games(events), conn, NAMES.get)["games"][0]
         self.assertEqual(row["coach_vs_you"], "—")  # nothing to compare against, no crash
+
+    def test_player_keeps_fall_back_to_session_and_game_order(self):
+        conn = db({"2026-10-20 10:00:00": [("SLAM", 1, 1)], "2026-10-20 10:20:00": [("SLAM", 1, 0)]})
+        # Both games sit in the same session folder (ids 1 and 2 -> S0 by the helper,
+        # so set them explicitly): game 2 of session S0 is the second row.
+        conn.execute("UPDATE games SET source_file = '/logs/Hearthstone_TEST/Power.log'")
+        self.assertIsNone(cr.player_keeps(conn, None, NAMES.get))
+        self.assertEqual(cr.player_keeps(conn, None, NAMES.get, session="Hearthstone_TEST", game_no=2),
+                         {"slam": False})
+        self.assertEqual(cr.player_keeps(conn, "2026-10-20 10:00:00", NAMES.get),
+                         {"slam": True}, "start_time still wins when present")
 
     def test_card_key_and_keeps(self):
         self.assertEqual(cr.card_key("Slam x2"), "slam")
