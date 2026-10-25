@@ -110,5 +110,34 @@ class FailOpenTests(unittest.TestCase):
         self.assertEqual(check_plan([], {}), [])
 
 
+def spell(name, cost):
+    return {"name": name, "cost": cost, "type": "SPELL"}
+
+
+class DiscountTests(unittest.TestCase):
+    """Three false alarms from a live game: rules the check did not model."""
+
+    def test_preparation_discounts_the_next_spell(self):
+        hand = [spell("Preparation", 0), spell("Eventuality", 2)]
+        self.assertEqual(check_plan(["Play Preparation (0)", "Play Eventuality (2) -> Rat"],
+                                    snap(hand=hand, mana=0)), [], "Eventuality costs 0 after Preparation")
+        self.assertEqual(rules(check_plan(["Play Eventuality (2) -> Rat"], snap(hand=hand, mana=1))),
+                         ["mana"], "without Preparation it still costs 2")
+
+    def test_whip_costs_less_for_each_coin_held(self):
+        hand = [{"name": "Blackpaw's Whip", "cost": 3, "type": "WEAPON"}, spell("The Coin", 0)]
+        self.assertEqual(check_plan(["Play Blackpaw's Whip (2, holding the Coin)", "Play The Coin"],
+                                    snap(hand=hand, mana=2)), [])
+        no_coin = [{"name": "Blackpaw's Whip", "cost": 3, "type": "WEAPON"}]
+        self.assertEqual(rules(check_plan(["Play Blackpaw's Whip (3)"], snap(hand=no_coin, mana=2))),
+                         ["mana"])
+
+    def test_coin_made_mid_turn_counts_for_the_whip(self):
+        hand = [spell("Agent of the Old Ones", 1), {"name": "Blackpaw's Whip", "cost": 3, "type": "WEAPON"}]
+        steps = ["Play Agent of the Old Ones (1); Battlecry: transform Jade Guardians into a Coin",
+                 "Play Blackpaw's Whip (2, holding the Coin)"]
+        self.assertEqual(check_plan(steps, snap(hand=hand, mana=3)), [], "1 + (3 - 1 coin) = 3")
+
+
 if __name__ == "__main__":
     unittest.main()

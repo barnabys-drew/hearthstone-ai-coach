@@ -34,6 +34,8 @@ _FREE_RE = re.compile(r"\b(refund(ed|s)?|free|costs?\s*\(?0\)?|0 mana|reduced|di
 # Things a plan "plays" that aren't hand cards with a cost.
 _NOT_A_CARD = re.compile(r"^(the\s+)?(discovered|generated|drawn|new|it|them|that|this|"
                          r"remaining|rest|anything|whatever|a\s|an\s|another|any|card|minion|spell)\b", re.I)
+# A step that makes a Coin mid-turn ("transform X into a Coin", "Get a Coin").
+_MAKES_COIN_RE = re.compile(r"\b(transform\w*|get|gets|gain|adds?)\b[^.;]*\bcoin\b", re.I)
 
 
 def _norm(name: str) -> str:
@@ -97,6 +99,9 @@ def check_plan(steps: list[str], snap: dict[str, Any]) -> list[dict[str, str]]:
     # --- cards that exist nowhere, and the mana bill for those in hand -------
     remaining = list(hand)  # each hand card pays once, even if named twice
     spent, coins = 0, 0
+    coins_held = sum(1 for c in hand if _norm(c.get("name") or "") in ("the coin", "coin"))
+    made = sum(1 for s in steps if _MAKES_COIN_RE.search(s))  # Coins made mid-turn
+    prep_pending = False  # Preparation: the next spell this turn costs 2 less
     for step in steps:
         for cand in _played_names(step):
             if _NOT_A_CARD.match(cand):
@@ -109,7 +114,14 @@ def check_plan(steps: list[str], snap: dict[str, Any]) -> list[dict[str, str]]:
                 card = next(c for c in remaining if c.get("name") == name)
                 remaining.remove(card)
                 cost = card.get("cost")
+                if _norm(name) == "preparation":
+                    prep_pending = True
                 if isinstance(cost, int) and not _FREE_RE.search(step):
+                    if prep_pending and _norm(name) != "preparation" \
+                            and str(card.get("type") or "").upper() == "SPELL":
+                        cost, prep_pending = max(0, cost - 2), False
+                    if _norm(name) == "blackpaw's whip":  # costs 1 less per Coin held
+                        cost = max(0, cost - max(0, coins_held + made - coins))
                     spent += cost
                 continue
             if _find(cand, hand_names) or _find(cand, known_elsewhere):
