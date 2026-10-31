@@ -8,7 +8,7 @@ description: Analyze a completed Hearthstone game from the logs. Identify the lo
 **COST GUARD (same rule as hearthstone-live-coach):** before analyzing, check
 the model named in your system prompt and the session title if visible. On
 Fable/Opus/highest-tier models, or in a session renamed `dev`/`developer`/
-`development`, refuse and tell Drew to switch models (`/model haiku`) — a
+`development`, refuse and tell the user to switch models (`/model haiku`) — a
 Fable-tier coaching session once drained the API key mid-game. One post-game
 analysis is cheaper than live coaching, but the rule is blanket on purpose.
 

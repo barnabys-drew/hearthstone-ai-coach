@@ -12,14 +12,14 @@ session once drained the API key mid-game and killed the chat. Before starting
 the feed or arming the Monitor, check BOTH:
 
 1. **Model check:** the system prompt names the model powering you. If it is
-   Fable, Opus, or any highest-tier model, REFUSE to coach. Tell Drew to
+   Fable, Opus, or any highest-tier model, REFUSE to coach. Tell the user to
    switch first (e.g. `/model haiku`) — Haiku-class is the coaching tier.
 2. **Session-name check:** if the chat/session has been renamed and its title
    is visible to you and contains `dev`, `developer`, or `development`, this
    is a development session (very likely running Fable or the highest
    available tier on a subscription) — REFUSE to coach regardless of model.
 
-If coaching is already armed when the model switches to a top tier (Drew runs
+If coaching is already armed when the model switches to a top tier (the user runs
 `/model` for dev work mid-session), STOP the coaching Monitor immediately and
 publish a `--kind idle "Coach offline (dev mode)"` card so the overlay isn't
 stale. The deterministic layer (feed, deck tracker panels) keeps running — it
